@@ -35,10 +35,16 @@ class RegionFilesReader:
         self.writeCacheFile(directoryPath)
 
     def attemptLoadCacheFile(self, directoryPath):
-        for subdir, dirs, files in os.walk(os.path.dirname(os.path.abspath(__file__))):
+        cacheDir = os.path.join(os.path.dirname(__file__), 'cache')
+
+        if os.path.exists(cacheDir) == False:
+            os.mkdir(cacheDir)
+
+
+        for subdir, dirs, files in os.walk(cacheDir):
             for file in files:
                 if file.endswith(("_cache.json")):
-                    fileContents = open(file).read()
+                    fileContents = open(os.path.join(cacheDir, file)).read()
 
                     if fileContents != "":
                         JSON = json.loads(fileContents)
@@ -57,6 +63,9 @@ class RegionFilesReader:
         return False
 
     def writeCacheFile(self, directoryPath):
+        cacheDirPath = os.path.join(os.path.dirname(__file__), 'cache/')
+        cacheFilePath = os.path.join(cacheDirPath, f'{time.time()}_cache.json')
+
         cacheFile = {
             "regionFolderPath": directoryPath,
             "chunks": list(map(lambda chunk: {
@@ -68,7 +77,10 @@ class RegionFilesReader:
             }, self.chunks))
         }
 
-        with open(f'{time.time()}_cache.json', "w") as outfile:
+        if os.path.exists(cacheDirPath) == False:
+            os.mkdir(cacheDirPath)
+
+        with open(cacheFilePath, "w") as outfile:
             outfile.write(json.dumps(cacheFile, indent=4))
             outfile.close()
 

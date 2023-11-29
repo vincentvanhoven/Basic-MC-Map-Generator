@@ -1,5 +1,3 @@
-import sys
-
 class Chunk:
     def __init__(self, dataOffset, timestamp = None, isLoaded = False, x = 0, z =0):
         self.dataOffset = dataOffset
