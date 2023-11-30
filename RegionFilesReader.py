@@ -5,9 +5,14 @@ import os
 from Chunk import Chunk
 from alive_progress import alive_bar
 import json
-
+import multiprocessing as mp
 from TerminalColors import TerminalColors
+from random import randint
+from time import sleep
 
+def process_region_file(args):
+    regionFilesReader, filePath = args
+    return regionFilesReader.processRegionFile(filePath)
 
 # The region file header is 8KiB
 #   4KiB chunk locations
@@ -16,20 +21,31 @@ from TerminalColors import TerminalColors
 class RegionFilesReader:
     def __init__(self):
         self.chunks = []
+        self.progressBar = None
 
     def iterateDirectory(self, directoryPath, ignoreCache):
         if ignoreCache is False:
             if self.attemptLoadCacheFile(directoryPath):
                 return
 
+        regionFiles = []
+
         for subdir, dirs, files in os.walk(directoryPath):
             print("Reading region files...")
 
-            with alive_bar(len(files)) as bar:  # your expected total
-                for file in files:
-                    if file.endswith((".mca")):
-                        self.processRegionFile(f'{directoryPath}/{file}')
-                        bar()
+            for file in files:
+                if file.endswith((".mca")):
+                    regionFiles.append(f'{directoryPath}/{file}')
+
+        # progressBar = alive_bar(len(regionFiles))
+
+        args = [(self, file) for file in regionFiles]
+        pool = mp.Pool(processes=len(regionFiles))
+        data = pool.map(process_region_file, args)
+        pool.close()
+
+        for chunkCollection in data:
+            self.chunks = self.chunks + chunkCollection
 
         print("Writing chunks to cache...")
         self.writeCacheFile(directoryPath)
@@ -170,9 +186,8 @@ class RegionFilesReader:
 
         chunks = [chunk for chunk in chunks if chunk.isLoaded != False]
 
-        # Persist chunks
-        self.chunks = self.chunks + chunks
-
         # Closing the opened file
         file.close()
 
+        # Return chunks
+        return chunks
