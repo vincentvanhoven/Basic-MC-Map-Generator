@@ -16,7 +16,6 @@ from TerminalColors import TerminalColors
 class RegionFilesReader:
     def __init__(self):
         self.chunks = []
-        # self.progressBar = None
 
     def process_region_file(self, filePath):
         return self.processRegionFile(filePath)
@@ -38,14 +37,15 @@ class RegionFilesReader:
 
         print(f'opening pool with {amountOfProcesses} processes')
         pool = mp.Pool(processes=amountOfProcesses)
+        chunks = []
 
         def callback(chunkArray):
-            self.chunks = self.chunks + chunkArray
+            chunks.extend(chunkArray)
             progressBar.set_description_str(f'Reading region files ({len(self.chunks)} chunks)')
             progressBar.update(1)
 
-        for file in regionFiles:
-            pool.apply_async(self.process_region_file, (file,), callback=callback, error_callback=(lambda x: print(x)))
+        for filePath in regionFiles:
+            pool.apply_async(self.process_region_file, (filePath,), callback=callback, error_callback=(lambda x: print(x)))
 
         # Indicate that no new jobs will be pushed to the pool
         pool.close()
@@ -54,6 +54,8 @@ class RegionFilesReader:
 
         # Ensure the progress bar is closed properly
         progressBar.close()
+
+        self.chunks = chunks
 
         # Writing chunks to JSON cache file
         print("Writing chunks to cache...")
