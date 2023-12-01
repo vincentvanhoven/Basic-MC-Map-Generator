@@ -45,7 +45,7 @@ if __name__ == '__main__':
 
     print(f'Chunk range runs from [{minX}, {minZ}] to [{maxX}, {maxZ}]')
 
-    tileSize = 12
+    tileSize = 1
     imageWidth = (abs(minX) + maxX) * tileSize
     imageHeight = (abs(minZ) + maxZ) * tileSize
 
