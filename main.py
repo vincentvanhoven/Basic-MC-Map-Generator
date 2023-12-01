@@ -14,9 +14,13 @@ if __name__ == '__main__':
     dateTimeStart = datetime.datetime.now()
 
     sourcePath = sys.argv[1]
+    amountOfProcesses = 512
     ignoreCache = False
+
     if len(sys.argv) > 2:
-        ignoreCache = sys.argv[2] if sys.argv[2] else False
+        amountOfProcesses = int(sys.argv[2]) if sys.argv[2] else 512
+    if len(sys.argv) > 3:
+        ignoreCache = sys.argv[3] if sys.argv[3] else False
 
     outputDir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'output')
 
@@ -26,7 +30,7 @@ if __name__ == '__main__':
     outputFilePath = os.path.join(outputDir, f'map_{time.time()}.png')
 
     regionFilesReader = RegionFilesReader()
-    regionFilesReader.iterateDirectory(sourcePath, ignoreCache)
+    regionFilesReader.iterateDirectory(sourcePath, ignoreCache, amountOfProcesses)
 
     print(f'Read {len(regionFilesReader.chunks)} chunks from the region files or cache.')
 

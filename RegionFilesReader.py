@@ -21,7 +21,7 @@ class RegionFilesReader:
     def process_region_file(self, filePath):
         return self.processRegionFile(filePath)
 
-    def iterateDirectory(self, directoryPath, ignoreCache):
+    def iterateDirectory(self, directoryPath, ignoreCache, amountOfProcesses):
         if ignoreCache is False:
             if self.attemptLoadCacheFile(directoryPath):
                 return
@@ -35,7 +35,9 @@ class RegionFilesReader:
 
         # baseline: ~10s
         progressBar = tqdm(total=len(regionFiles))
-        pool = mp.Pool(processes=len(regionFiles))
+
+        print(f'opening pool with {amountOfProcesses} processes')
+        pool = mp.Pool(processes=amountOfProcesses)
 
         def callback(chunkArray):
             self.chunks = self.chunks + chunkArray
