@@ -41,7 +41,7 @@ class RegionFilesReader:
 
         def callback(chunkArray):
             chunks.extend(chunkArray)
-            progressBar.set_description_str(f'Reading region files ({len(self.chunks)} chunks)')
+            progressBar.set_description_str(f'Reading region files ({len(chunks)} chunks)')
             progressBar.update(1)
 
         for filePath in regionFiles:
