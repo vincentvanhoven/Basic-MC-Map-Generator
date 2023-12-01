@@ -48,6 +48,13 @@ if __name__ == '__main__':
     tileSize = 1
     imageWidth = (abs(minX) + maxX) * tileSize
     imageHeight = (abs(minZ) + maxZ) * tileSize
+    imageOriginX = abs(minX) * tileSize
+    imageOriginZ = abs(minZ) * tileSize
+
+    print(f'[minX: {minX}, maxX: {maxX}]')
+    print(f'[minZ: {minZ}, maxZ: {maxZ}]')
+    print(f'[imageWidth: {imageWidth}, imageHeight: {imageHeight}]')
+    print(f'[imageOriginX: {imageOriginX}, imageOriginZ: {imageOriginZ}]')
 
     im = Image.new(mode="RGB", size=(imageWidth, imageHeight))
 
@@ -58,11 +65,10 @@ if __name__ == '__main__':
 
         draw.rectangle(
             (
-                (imageWidth / 2) + (chunk.x * tileSize),
-                # The height position has to be offset by (- tileSize * 2) to render properly, for some reason. Unsure why.
-                (imageHeight / 2) + (chunk.z * tileSize) - (tileSize * 2),
-                (imageWidth / 2) + (chunk.x * tileSize) + tileSize,
-                (imageHeight / 2) + (chunk.z * tileSize) - tileSize,
+                imageOriginX + (chunk.x * tileSize),
+                imageOriginZ + (chunk.z * tileSize),
+                imageOriginX + ((chunk.x + 1) * tileSize),
+                imageOriginZ + ((chunk.z + 1) * tileSize),
             ),
             fill=color
         )
