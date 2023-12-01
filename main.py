@@ -14,11 +14,11 @@ if __name__ == '__main__':
     dateTimeStart = datetime.datetime.now()
 
     sourcePath = sys.argv[1]
-    amountOfProcesses = 512
+    amountOfProcesses = 48
     ignoreCache = False
 
     if len(sys.argv) > 2:
-        amountOfProcesses = int(sys.argv[2]) if sys.argv[2] else 512
+        amountOfProcesses = int(sys.argv[2]) if sys.argv[2] else 48
     if len(sys.argv) > 3:
         ignoreCache = sys.argv[3] if sys.argv[3] else False
 
