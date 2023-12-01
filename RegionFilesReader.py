@@ -234,9 +234,6 @@ class RegionFilesReader:
                         # Read the palette item data and store it in 'chunkBiomes' as a UTF-8 string
                         chunkBiomes.append(chunkDataStream.read(paletteIndexValueLength).decode("utf-8"))
 
-                        # if not (len(chunkBiomes) > 0):
-                            # print("something went oddly here")
-
                 if len(chunkBiomes) > 0:
                     chunks[chunkIndex].biome = max(set(chunkBiomes), key = chunkBiomes.count)
 
