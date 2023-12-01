@@ -2,26 +2,24 @@ import time
 import io
 import zlib
 import os
+
+from tqdm import tqdm
 from Chunk import Chunk
-from alive_progress import alive_bar
 import json
 import multiprocessing as mp
 from TerminalColors import TerminalColors
-from random import randint
-from time import sleep
 
-def process_region_file(args):
-    regionFilesReader, filePath = args
-    return regionFilesReader.processRegionFile(filePath)
 
 # The region file header is 8KiB
 #   4KiB chunk locations
 #   4KiB chunk timestamps (last updated)
-
 class RegionFilesReader:
     def __init__(self):
         self.chunks = []
-        self.progressBar = None
+        # self.progressBar = None
+
+    def process_region_file(self, filePath):
+        return self.processRegionFile(filePath)
 
     def iterateDirectory(self, directoryPath, ignoreCache):
         if ignoreCache is False:
@@ -31,22 +29,31 @@ class RegionFilesReader:
         regionFiles = []
 
         for subdir, dirs, files in os.walk(directoryPath):
-            print("Reading region files...")
-
             for file in files:
                 if file.endswith((".mca")):
                     regionFiles.append(f'{directoryPath}/{file}')
 
-        # progressBar = alive_bar(len(regionFiles))
-
-        args = [(self, file) for file in regionFiles]
+        # baseline: ~10s
+        progressBar = tqdm(total=len(regionFiles))
         pool = mp.Pool(processes=len(regionFiles))
-        data = pool.map(process_region_file, args)
+
+        def callback(chunkArray):
+            self.chunks = self.chunks + chunkArray
+            progressBar.set_description_str(f'Reading region files ({len(self.chunks)} chunks)')
+            progressBar.update(1)
+
+        for file in regionFiles:
+            pool.apply_async(self.process_region_file, (file,), callback=callback, error_callback=(lambda x: print(x)))
+
+        # Indicate that no new jobs will be pushed to the pool
         pool.close()
+        # Wait for all jobs to finish
+        pool.join()
 
-        for chunkCollection in data:
-            self.chunks = self.chunks + chunkCollection
+        # Ensure the progress bar is closed properly
+        progressBar.close()
 
+        # Writing chunks to JSON cache file
         print("Writing chunks to cache...")
         self.writeCacheFile(directoryPath)
 
@@ -69,6 +76,7 @@ class RegionFilesReader:
                             print(TerminalColors.OKGREEN + "Found a cache file. Loading chunk data from cache file..." + TerminalColors.ENDC)
                             self.chunks = list(map(lambda chunk: Chunk(
                                 chunk.get("dataOffset"),
+                                chunk.get("biome"),
                                 chunk.get("timestamp"),
                                 chunk.get("isLoaded"),
                                 chunk.get("x"),
@@ -86,6 +94,7 @@ class RegionFilesReader:
             "regionFolderPath": directoryPath,
             "chunks": list(map(lambda chunk: {
                 "dataOffset": chunk.dataOffset,
+                "biome": chunk.biome,
                 "timestamp": chunk.timestamp,
                 "isLoaded": chunk.isLoaded,
                 "x": chunk.x,
@@ -108,7 +117,7 @@ class RegionFilesReader:
 
         # Read the locations of the chunk data in the region file
         for chunkIndex in range(1024):
-            # The first 3 bytes are the offset (in bytes) from the start of the region file to the start of the chunk
+            # The first 3 bytes define the offset (in bytes) from the start of the region file to the start of the chunk
             # data for this particular chunk
             chunkDataOffset = int.from_bytes(file.read(3), byteorder='big')
             # The following byte indicates the approximate size of the chunk data
@@ -178,8 +187,57 @@ class RegionFilesReader:
 
             # Read over the NBT tag name
             chunkDataStream.seek(zPosDataOffset + 4, 0)
-            # Read the chunk's x position data
+            # Read the chunk's z position data
             chunks[chunkIndex].z = int.from_bytes(chunkDataStream.read(4), byteorder='big', signed=True)
+
+            # Reset the cursor
+            chunkDataStream.seek(0, 0)
+
+            # Find the offset of the 'sections' list
+            sectionDataOffset = chunkDataStream.read().find(b'sections')
+            # Read over the NBT tag name
+            chunkDataStream.seek(sectionDataOffset + 9, 0)
+            # Read the 'sections' list length
+            sectionsListLength = int.from_bytes(chunkDataStream.read(4), byteorder='big', signed=True)
+
+            # Prepare storing the biomes of this chunk
+            chunkBiomes = []
+
+            for sectionsIndex in range(0,  sectionsListLength):
+                # Get the position of the stream cursor
+                currentOffset = chunkDataStream.tell()
+                # Find the index of the 'sections.biomes' list (corrected for the current position of the cursor)
+                biomesOffset = chunkDataStream.read().find(b'biomes') + currentOffset
+                # Place cursor at the 'sections.biomes' opening tag
+                chunkDataStream.seek(biomesOffset)
+
+                # Get the position of the stream cursor
+                currentOffset = chunkDataStream.tell()
+                # Find the index of the 'sections.biomes.palette' list (corrected for the current position of the cursor)
+                paletteOffset = chunkDataStream.read().find(b'palette') + currentOffset
+                # Place cursor at the 'sections.biomes.palette' data
+                chunkDataStream.seek(paletteOffset + 8)
+                # Read the length of the 'sections.biomes.palette' list (in items, not bytes)
+                paletteListLength = int.from_bytes(chunkDataStream.read(4), byteorder='big', signed=True)
+
+                # Iterate over all the palettes that should be in the 'sections.biomes.palette' list
+                for paletteIndex in range(0, paletteListLength):
+                    # Get the position of the stream cursor
+                    currentOffset = chunkDataStream.tell()
+                    # Find the index of the current palette item (corrected for the current position of the cursor)
+                    paletteIndexOffset = chunkDataStream.read().find(b'minecraft:') + currentOffset
+                    # Place cursor just before the current palette item data
+                    chunkDataStream.seek(paletteIndexOffset - 2)
+                    # Read the length of the current palette item data
+                    paletteIndexValueLength = int.from_bytes(chunkDataStream.read(2), byteorder='big', signed=False)
+                    # Read the palette item data and store it in 'chunkBiomes' as a UTF-8 string
+                    chunkBiomes.append(chunkDataStream.read(paletteIndexValueLength).decode("utf-8"))
+
+                    # if not (len(chunkBiomes) > 0):
+                        # print("something went oddly here")
+
+            if len(chunkBiomes) > 0:
+                chunks[chunkIndex].biome = max(set(chunkBiomes), key = chunkBiomes.count)
 
             # Mark the chunk instance as valid
             chunks[chunkIndex].isLoaded = True

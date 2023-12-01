@@ -1,4 +1,6 @@
 from PIL import Image, ImageDraw
+from tqdm import tqdm
+from BiomeColors import BiomeColors
 from RegionFilesReader import RegionFilesReader
 import datetime
 import sys
@@ -26,7 +28,10 @@ if __name__ == '__main__':
     regionFilesReader = RegionFilesReader()
     regionFilesReader.iterateDirectory(sourcePath, ignoreCache)
 
-    print(f'Read {len(regionFilesReader.chunks)} chunks from the region files or cache. Now generating the render...')
+    print(f'Read {len(regionFilesReader.chunks)} chunks from the region files or cache.')
+
+    progressBar = tqdm(total=len(regionFilesReader.chunks))
+    progressBar.set_description_str(f'Rendering chunks')
 
     minX = 0
     maxX = 0
@@ -43,7 +48,7 @@ if __name__ == '__main__':
         if chunk.z >= maxZ:
             maxZ = chunk.z
 
-    print(f'Chunk range runs from [{minX}, {minZ}] to [{maxX}, {maxZ}]')
+    # print(f'Chunk range runs from [{minX}, {minZ}] to [{maxX}, {maxZ}]')
 
     tileSize = 1
     imageWidth = (abs(minX) + maxX) * tileSize
@@ -51,17 +56,18 @@ if __name__ == '__main__':
     imageOriginX = abs(minX) * tileSize
     imageOriginZ = abs(minZ) * tileSize
 
-    print(f'[minX: {minX}, maxX: {maxX}]')
-    print(f'[minZ: {minZ}, maxZ: {maxZ}]')
-    print(f'[imageWidth: {imageWidth}, imageHeight: {imageHeight}]')
-    print(f'[imageOriginX: {imageOriginX}, imageOriginZ: {imageOriginZ}]')
+    # print(f'[minX: {minX}, maxX: {maxX}]')
+    # print(f'[minZ: {minZ}, maxZ: {maxZ}]')
+    # print(f'[imageWidth: {imageWidth}, imageHeight: {imageHeight}]')
+    # print(f'[imageOriginX: {imageOriginX}, imageOriginZ: {imageOriginZ}]')
 
     im = Image.new(mode="RGB", size=(imageWidth, imageHeight))
-
     draw = ImageDraw.Draw(im)
 
+    biomeColors = BiomeColors()
+
     for chunk in regionFilesReader.chunks:
-        color = (254, 0, 0)
+        color = biomeColors.getColor(chunk.biome)
 
         draw.rectangle(
             (
@@ -72,8 +78,10 @@ if __name__ == '__main__':
             ),
             fill=color
         )
+        progressBar.update(1)
 
     im.save(outputFilePath)
+    progressBar.close()
 
     print(f'{TerminalColors.OKGREEN}The file was generated in: {(datetime.datetime.now() - dateTimeStart).total_seconds()} seconds and can be found here:{TerminalColors.ENDC}')
     print(outputFilePath)
