@@ -60,12 +60,7 @@ if __name__ == '__main__':
     imageOriginX = abs(minX) * tileSize
     imageOriginZ = abs(minZ) * tileSize
 
-    # print(f'[minX: {minX}, maxX: {maxX}]')
-    # print(f'[minZ: {minZ}, maxZ: {maxZ}]')
-    # print(f'[imageWidth: {imageWidth}, imageHeight: {imageHeight}]')
-    # print(f'[imageOriginX: {imageOriginX}, imageOriginZ: {imageOriginZ}]')
-
-    im = Image.new(mode="RGB", size=(imageWidth, imageHeight))
+    im = Image.new(mode="RGBA", size=(imageWidth, imageHeight))
     draw = ImageDraw.Draw(im)
 
     biomeColors = BiomeColors()
