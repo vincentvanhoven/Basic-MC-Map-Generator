@@ -1,9 +1,6 @@
-name: 'Run tests'
+name: 'Build and tag a new release'
 
-on:
-  workflow_dispatch:
-  push:
-  pull_request:
+on: workflow_dispatch
 
 concurrency:
   group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
@@ -22,20 +19,15 @@ jobs:
           node-version: 20.12.*
           cache: npm
 
-      - name: NPM Build
-        run: |
-          npm install
-          npm run build
-  go-build:
-    runs-on: "ubuntu-latest"
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.22.x'
 
-      - name: Go Build
+      - name: NPM Build
+        run: |
+          npm install
+          npm run build
+
+      - name: Go builds
         run: ./build_all.sh

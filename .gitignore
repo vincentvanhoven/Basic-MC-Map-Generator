@@ -26,4 +26,5 @@ static
 
 # Build/runtime files
 *.exe
+bin/
 cache/
