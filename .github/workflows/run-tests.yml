@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   npm-build:
-    runs-on: ${{ fromJSON('["ubuntu-latest", "self-hosted"]')[github.repository == 'github/docs-internal'] }}
+    runs-on: "ubuntu-latest"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,7 +22,20 @@ jobs:
           node-version: 20.12.*
           cache: npm
 
-      - name: Install
+      - name: NPM Build
         run: |
           npm install
           npm run build
+  go-build:
+   runs-on: "ubuntu-latest"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+
+      - name: Go Build
+        run: go build
