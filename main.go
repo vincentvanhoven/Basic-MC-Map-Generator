@@ -33,6 +33,8 @@ func getIntParamWithFallback(r *http.Request, paramName string, fallback int) in
 		// parsedInt, error := strconv.Atoi(urlParam)
 		parsedInt, error := strconv.Atoi(urlParam)
 
+		TEST_GITHUB_ACTION_FAIL
+
 		if error == nil {
 			return parsedInt
 		} else {
