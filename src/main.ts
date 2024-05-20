@@ -1,5 +1,4 @@
 import './style.css';
-import collect from 'collect.js';
 
 import { BiomeColors } from "./BiomeColors";
 import { Chunk } from "./Chunk";
@@ -18,7 +17,6 @@ class MapHandler {
     private imageCreationCanvas: HTMLCanvasElement;
     private imageCreationCanvasContext: CanvasRenderingContext2D;
 
-    private isDebugRenderEnabled: boolean = false;
     private isMouseDown: boolean = false;
     private dragOffsetInPx: Vector = new Vector(0, 0);
     private zoomLevel: number = 1000;
@@ -142,13 +140,13 @@ class MapHandler {
 
     }
 
-    onResizeEvent(event: Event) {
+    onResizeEvent(_event: Event) {
         this.canvas.width = window.innerWidth;
         this.canvas.height = window.innerHeight;
         this.cache.purgeAll();
     }
 
-    onMouseDownEvent(event: MouseEvent) {
+    onMouseDownEvent(_event: MouseEvent) {
         this.isMouseDown = true;
     }
 
@@ -161,7 +159,7 @@ class MapHandler {
         }
     }
 
-    onMouseUpEvent(event: MouseEvent) {
+    onMouseUpEvent(_event: MouseEvent) {
         this.isMouseDown = false;
     }
 
@@ -238,7 +236,6 @@ class MapHandler {
         this.canvasContext.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
         // Determine compensation for keeping negative coords inside viewport.
-        let canvasCenterOffset = this.getCanvasCenterOffset();
         let totalOffset: Vector = this.getTotalChunkOffset();
 
         this.regions.forEach((region: Region) => {
