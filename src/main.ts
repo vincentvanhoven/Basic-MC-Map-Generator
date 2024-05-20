@@ -7,8 +7,6 @@ import Vector from "./Vector";
 import CacheManager from './CacheManager';
 
 class MapHandler {
-    TEST_BREAK_GITHUB_ACTIONS
-    
     private cache: CacheManager = new CacheManager();
     private chunks: Chunk[] = [];
     private apiChunksPageSize: number = 25;
