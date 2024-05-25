@@ -28,3 +28,4 @@ static
 *.exe
 bin/
 cache/
+config.json
