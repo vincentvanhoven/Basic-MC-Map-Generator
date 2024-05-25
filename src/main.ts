@@ -1,6 +1,5 @@
 import './style.css';
 
-import { BiomeColors } from "./BiomeColors";
 import { Chunk } from "./Chunk";
 import { Region } from "./Region";
 import Vector from "./Vector";
@@ -12,6 +11,7 @@ class MapHandler {
     private apiChunksPageSize: number = 25;
     private renderTileSize: number = 1;
     private regions: Region[] = [];
+    private palette: any[] = [];
     private canvas: HTMLCanvasElement;
     private canvasContext: CanvasRenderingContext2D;
     private imageCreationCanvas: HTMLCanvasElement;
@@ -45,24 +45,33 @@ class MapHandler {
     }
 
     async fetchAllRegions() {
-        fetch('/regionslist')
+        console.time('start');
+        
+        await fetch('/regionslist')
             .then((response) => {
                 return response.json();
             })
             .then(async (json) => {
                 this.regions = json;
-
-                console.time('start');
-                
-                let totalAPIPages = Math.ceil(this.regions.length / this.apiChunksPageSize)
-                
-                for(let pageCount = 0; pageCount < totalAPIPages; pageCount++) {
-                    await this.fetchChunks(pageCount);
-                }
-
-                console.log(`Fetched ${this.chunks.length} chunks. This is how long the operation took:`);
-                console.timeEnd('start');
             });
+        
+        await fetch('/palette')
+            .then((response) => {
+                return response.json()
+            })
+            .then(async (json) => {
+                console.log(this.palette)
+                this.palette = json;
+            })
+            
+        let totalAPIPages = Math.ceil(this.regions.length / this.apiChunksPageSize)
+        
+        for(let pageCount = 0; pageCount < totalAPIPages; pageCount++) {
+            await this.fetchChunks(pageCount);
+        }
+
+        console.log(`Fetched ${this.chunks.length} chunks. This is how long the operation took:`);
+        console.timeEnd('start');
     }
 
     async fetchChunks(page: number) {
@@ -71,9 +80,24 @@ class MapHandler {
                 return response.json();
             })
             .then((json) => {
-                this.generateRegionImages(json);
+                let chunkData: Chunk[] = [];
 
-                this.chunks = [...this.chunks, ...json]
+                Object.keys(json).forEach((biomeKey) => {
+                    let chunksForBiomeKey = json[biomeKey];
+
+                    chunksForBiomeKey.forEach((chunkCoords: {X: number, Z: number}) => {
+                        chunkData.push({
+                            PosX: chunkCoords.X,
+                            PosZ: chunkCoords.Z,
+                            Biome: this.palette[parseInt(biomeKey)].Biome,
+                            Color: this.palette[parseInt(biomeKey)].Color,
+                        })
+                    })
+                })
+
+                this.generateRegionImages(chunkData);
+
+                this.chunks = [...this.chunks, ...chunkData]
             })
             .catch((err) => {
                 console.error(err)
@@ -116,15 +140,11 @@ class MapHandler {
                 chunkZ = 31 - chunkZ;
 
                 let pos = ((chunkZ * 32) + chunkX) * 4;
-                let formattedBiomeString = chunk.Biome.split(":")?.[1];
-
-                // @ts-ignore for now
-                let cellColor = BiomeColors[formattedBiomeString];
 
                 // This data is in rgba format
-                imageBuffer[pos] = cellColor[0];
-                imageBuffer[pos+1] = cellColor[1];
-                imageBuffer[pos+2] = cellColor[2];
+                imageBuffer[pos] = parseInt(chunk.Color[0]);
+                imageBuffer[pos+1] = parseInt(chunk.Color[1]);
+                imageBuffer[pos+2] = parseInt(chunk.Color[2]);
                 imageBuffer[pos+3] = 255;
             });
 
@@ -171,9 +191,6 @@ class MapHandler {
 
         // Scrolling down should make the zoom 'smaller' (so to speak) but results in a positive deltaY, hence the subtraction here to flip the value.
         this.zoomLevel -= event.deltaY;
-
-        let scalar = 1 + (-event.deltaY / 1000);
-        this.canvasContext.scale(scalar, scalar);
 
         // let translatedMouseCoordsAfter: Vector = new Vector(
         //     (event.clientX + this.dragOffsetInPx.x) * (this.zoomLevel / 1000),
@@ -231,9 +248,13 @@ class MapHandler {
     }
 
     render() {
+        this.canvasContext.save();
+
         // this.canvasContext.clearRect(0, 0, this.canvas.width, this.canvas.height)
         this.canvasContext.fillStyle = `black`;
         this.canvasContext.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        this.canvasContext.scale(this.zoomLevel / 1000, this.zoomLevel / 1000)
 
         // Determine compensation for keeping negative coords inside viewport.
         let totalOffset: Vector = this.getTotalChunkOffset();
@@ -250,6 +271,8 @@ class MapHandler {
 
             this.canvasContext.drawImage(region.image, Math.round(regionRenderPos.x), Math.round(regionRenderPos.y));
         });
+
+        this.canvasContext.restore();
     }
 
     debugRender() {

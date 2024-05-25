@@ -3,10 +3,11 @@ package main
 import (
 	"bytes"
 	"compress/zlib"
+	"embed"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"io"
+	"io/fs"
 	"io/ioutil"
 	"math"
 	"net/http"
@@ -20,7 +21,10 @@ import (
 	"github.com/Tnze/go-mc/nbt"
 )
 
-const rootDir string = "C:\\Users\\Vincent\\Desktop\\MC Server\\Anarchy\\world\\region\\"
+//go:embed static/*
+var staticAssets embed.FS
+
+var config Config
 
 func int24BinaryToInt32(bytes []byte) uint32 {
 	return binary.BigEndian.Uint32(append([]byte{0x00}, bytes...))
@@ -43,59 +47,20 @@ func getIntParamWithFallback(r *http.Request, paramName string, fallback int) in
 	return fallback
 }
 
-func findByteStringAllInReadSeeker(f io.ReadSeeker, search []byte, startCursorPos int64) ([]int, error) {
-	var indices []int
-	var prevFoundIndex int = 0
-
-	cursorPos := startCursorPos
-
-	for prevFoundIndex != -1 {
-		index, error := findByteStringInReadSeeker(f, search, cursorPos)
-
-		if error != nil {
-			return indices, error
-		}
-
-		if index != -1 {
-			indexFromStartCursorPos := int(cursorPos-startCursorPos) + int(index)
-			indices = append(indices, indexFromStartCursorPos)
-
-			cursorPos += int64(index) + 1
-
-			f.Seek(cursorPos, io.SeekStart)
-		}
-
-		prevFoundIndex = index
-	}
-
-	// Reset cursor
-	f.Seek(startCursorPos, io.SeekStart)
-
-	return indices, nil
-}
-
-func findByteStringInReadSeeker(f io.ReadSeeker, search []byte, startCursorPos int64) (int, error) {
-	data, err := ioutil.ReadAll(f)
-
-	if err != nil {
-		return 0, err
-	}
-
-	index := bytes.Index(data, search)
-
-	// Reset cursor
-	f.Seek(startCursorPos, io.SeekStart)
-
-	return index, nil
-}
-
 func main() {
-	fs := http.FileServer(http.Dir("static/"))
-	http.Handle("/", http.StripPrefix("/", fs))
+	loadConfig()
+
+	staticContent, _ := fs.Sub(staticAssets, "static")
+	http.Handle("/", http.FileServer(http.FS(staticContent)))
 
 	http.HandleFunc("/regionslist", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(getRegionsList())
+	})
+
+	http.HandleFunc("/palette", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(BiomeColors)
 	})
 
 	http.HandleFunc("/chunkdata", func(w http.ResponseWriter, r *http.Request) {
@@ -107,9 +72,9 @@ func main() {
 
 		var regions = getRegionsList()[from:to]
 
-		jobs := make(chan RegionReturnData)
+		jobs := make(chan Region)
 
-		results := make(chan []ChunkReturnData)
+		results := make(chan []Chunk)
 
 		wg := new(sync.WaitGroup)
 
@@ -130,12 +95,21 @@ func main() {
 			close(results)
 		}()
 
-		// wg.Wait()
-		// close(results)
+		var chunkData map[string][]struct {
+			X int
+			Z int
+		} = make(map[string][]struct {
+			X int
+			Z int
+		})
 
-		var chunkData []ChunkReturnData
 		for result := range results {
-			chunkData = append(chunkData, result...)
+			for _, chunk := range result {
+				chunkData[chunk.BiomeNumber] = append(chunkData[chunk.BiomeNumber], struct {
+					X int
+					Z int
+				}{X: chunk.X, Z: chunk.Z})
+			}
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -143,21 +117,58 @@ func main() {
 		json.NewEncoder(w).Encode(chunkData)
 	})
 
-	http.ListenAndServe(":8181", nil)
+	http.ListenAndServe(fmt.Sprintf(":%d", config.WebserverPort), nil)
 }
 
-func getRegionsList() []RegionReturnData {
-	var regionDataArray []RegionReturnData
+func loadConfig() {
+	var defaultConfig Config = Config{
+		PathToWorld:   "c:/users/vincent/desktop/mc server/anarchy/world",
+		WebserverPort: 8181,
+	}
 
-	entries, _ := os.ReadDir(rootDir)
+	filePath, error := getStoragePath("config.json")
+
+	if os.IsNotExist(error) {
+		config = defaultConfig
+		configFile, _ := os.Create(filePath)
+
+		jsonParser := json.NewEncoder(configFile)
+		jsonParser.Encode(config)
+
+		fmt.Println("Default config file loaded.")
+		return
+	}
+
+	configFile, error := os.OpenFile(filePath, os.O_RDONLY, os.ModePerm)
+
+	if error != nil {
+		panic(error)
+	}
+
+	defer configFile.Close()
+
+	json.NewDecoder(configFile).Decode(&config)
+
+	fmt.Println("Config file loaded.")
+
+}
+
+func getRegionsList() []Region {
+	var regionDataArray []Region
+
+	entries, _ := os.ReadDir(fmt.Sprintf("%s/region", config.PathToWorld))
 
 	for _, entry := range entries {
 		fileNameParts := strings.Split(entry.Name(), ".")
 
+		if fileNameParts[len(fileNameParts)-1] != "mca" {
+			continue
+		}
+
 		posX, _ := strconv.Atoi(fileNameParts[1])
 		posZ, _ := strconv.Atoi(fileNameParts[2])
 
-		regionDataArray = append(regionDataArray, RegionReturnData{
+		regionDataArray = append(regionDataArray, Region{
 			PosX: posX,
 			PosZ: posZ,
 		})
@@ -186,8 +197,8 @@ func getStoragePath(subPath string) (string, error) {
 	return subbedPath, err
 }
 
-func getCachedChunkData(region RegionReturnData) []ChunkReturnData {
-	var cachedChunkData []ChunkReturnData
+func getCachedChunkData(region Region) []Chunk {
+	var cachedChunkData []Chunk
 
 	filePath, _ := getStoragePath(fmt.Sprintf("cache/region.%d.%d.json", region.PosX, region.PosZ))
 	file, error := os.OpenFile(filePath, os.O_RDONLY, os.ModePerm)
@@ -199,7 +210,7 @@ func getCachedChunkData(region RegionReturnData) []ChunkReturnData {
 	return cachedChunkData
 }
 
-func setCachedChunkData(region RegionReturnData, chunkData []ChunkReturnData) {
+func setCachedChunkData(region Region, chunkData []Chunk) {
 	cachePath, error := getStoragePath("cache")
 
 	if os.IsNotExist(error) {
@@ -207,21 +218,23 @@ func setCachedChunkData(region RegionReturnData, chunkData []ChunkReturnData) {
 	}
 
 	filePath, _ := getStoragePath(fmt.Sprintf("cache/region.%d.%d.json", region.PosX, region.PosZ))
+	file, error := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, os.ModePerm)
 
-	file, _ := os.OpenFile(filePath, os.O_CREATE, os.ModePerm)
+	if error != nil {
+		panic(error)
+	}
+
 	defer file.Close()
 
 	file.Truncate(0)
 	json.NewEncoder(file).Encode(chunkData)
 }
 
-func getChunkData(regions <-chan RegionReturnData, results chan<- []ChunkReturnData, wg *sync.WaitGroup) {
+func getChunkData(regions <-chan Region, results chan<- []Chunk, wg *sync.WaitGroup) {
 	// Decreasing internal counter for wait-group as soon as goroutine finishes
 	defer wg.Done()
 
-	var chunkDataArray []ChunkReturnData
-
-	// start := time.Now()
+	var chunkDataArray []Chunk
 
 	for region := range regions {
 		chunkDataForRegion := getCachedChunkData(region)
@@ -231,9 +244,12 @@ func getChunkData(regions <-chan RegionReturnData, results chan<- []ChunkReturnD
 			continue
 		}
 
-		regionFileData, error := os.ReadFile(fmt.Sprintf("%s\\r.%d.%d.mca", rootDir, region.PosX, region.PosZ))
+		fmt.Printf("Cache MISS for region[x,z]: [%d,%d]\n", region.PosX, region.PosZ)
+
+		regionFileData, error := os.ReadFile(fmt.Sprintf("%s/region/r.%d.%d.mca", config.PathToWorld, region.PosX, region.PosZ))
 
 		if error != nil {
+			fmt.Println(error)
 			continue
 		}
 
@@ -387,18 +403,24 @@ func getChunkData(regions <-chan RegionReturnData, results chan<- []ChunkReturnD
 				}
 			}
 
-			chunkDataForRegion = append(chunkDataForRegion, ChunkReturnData{
-				PosX:  int(xPos.(int32)),
-				PosZ:  int(zPos.(int32)),
-				Biome: mostOftOcurringBiome,
+			biomeIndex := "-1"
+
+			for index, biomeData := range BiomeColors {
+				if biomeData.Biome == mostOftOcurringBiome {
+					biomeIndex = index
+				}
+			}
+
+			chunkDataForRegion = append(chunkDataForRegion, Chunk{
+				X:           int(xPos.(int32)),
+				Z:           int(zPos.(int32)),
+				BiomeNumber: biomeIndex,
 			})
 		}
 
 		setCachedChunkData(region, chunkDataForRegion)
 		chunkDataArray = append(chunkDataArray, chunkDataForRegion...)
 	}
-
-	// fmt.Printf("Total Time: %s\n", time.Since(start))
 
 	results <- chunkDataArray
 }
