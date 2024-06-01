@@ -11,6 +11,12 @@ type Region struct {
 	PosZ int
 }
 
+type Block struct {
+	PosX      int
+	PosZ      int
+	BlockType string
+}
+
 var CustomBiomeColors = map[string][]int{
 	"VOID_BLACK":       {0, 0, 0},
 	"PLAINS_GREEN":     {31, 40, 22},
