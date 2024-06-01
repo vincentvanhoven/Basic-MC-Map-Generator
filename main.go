@@ -49,6 +49,7 @@ func getIntParamWithFallback(r *http.Request, paramName string, fallback int) in
 
 func main() {
 	loadConfig()
+	readAllRegionFiles()
 
 	staticContent, _ := fs.Sub(staticAssets, "static")
 	http.Handle("/", http.FileServer(http.FS(staticContent)))
@@ -60,64 +61,49 @@ func main() {
 
 	http.HandleFunc("/palette", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(BiomeColors)
+		json.NewEncoder(w).Encode(getPalette())
 	})
 
-	http.HandleFunc("/chunkdata", func(w http.ResponseWriter, r *http.Request) {
-		var per_page int = getIntParamWithFallback(r, "per_page", 10)
-		var page int = getIntParamWithFallback(r, "page", 0)
+	http.HandleFunc("/blockdata", func(w http.ResponseWriter, r *http.Request) {
+		region_x := getIntParamWithFallback(r, "region_x", 0)
+		region_z := getIntParamWithFallback(r, "region_z", 0)
 
-		var from int = page * per_page
-		var to int = (page * per_page) + per_page
-
-		var regions = getRegionsList()[from:to]
-
-		jobs := make(chan Region)
-
-		results := make(chan []Chunk)
-
-		wg := new(sync.WaitGroup)
-
-		for w := 1; w <= per_page; w++ {
-			wg.Add(1)
-			go getChunkData(jobs, results, wg)
-		}
-
-		go func() {
-			for _, region := range regions {
-				jobs <- region
-			}
-			close(jobs)
-		}()
-
-		go func() {
-			wg.Wait()
-			close(results)
-		}()
-
-		var chunkData map[string][]struct {
-			X int
-			Z int
-		} = make(map[string][]struct {
-			X int
-			Z int
-		})
-
-		for result := range results {
-			for _, chunk := range result {
-				chunkData[chunk.BiomeNumber] = append(chunkData[chunk.BiomeNumber], struct {
-					X int
-					Z int
-				}{X: chunk.X, Z: chunk.Z})
-			}
-		}
+		blockData, error := getCachedBlockData(Region{PosX: region_x, PosZ: region_z})
 
 		w.Header().Set("Content-Type", "application/json")
 
-		json.NewEncoder(w).Encode(chunkData)
+		if error == nil {
+			json.NewEncoder(w).Encode(blockData)
+		} else {
+			json.NewEncoder(w).Encode(make([]int, 0))
+		}
 	})
 
-	http.ListenAndServe(fmt.Sprintf(":%d", config.WebserverPort), nil)
+	http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", config.WebserverPort), nil)
+}
+
+func readAllRegionFiles() {
+	wg := new(sync.WaitGroup)
+	jobs := make(chan Region)
+
+	wg.Add(1)
+
+	// Add workers
+	for w := 1; w <= 1; w++ {
+		go getChunkData(jobs, wg)
+	}
+
+	// Queue jobs
+	go func() {
+		for _, region := range getRegionsList()[0:1] {
+			jobs <- region
+		}
+		close(jobs)
+	}()
+
+	go func() {
+		wg.Wait()
+	}()
 }
 
 func loadConfig() {
@@ -150,7 +136,35 @@ func loadConfig() {
 	json.NewDecoder(configFile).Decode(&config)
 
 	fmt.Println("Config file loaded.")
+}
 
+func getPalette() map[int]string {
+	var regionDataArray map[int]string = make(map[int]string)
+
+	blockTypesPath, _ := getStoragePath("static/blocks")
+	entries, _ := os.ReadDir(blockTypesPath)
+
+	for index, entry := range entries {
+		fileNameParts := strings.Split(entry.Name(), ".")
+
+		if fileNameParts[len(fileNameParts)-1] != "png" {
+			continue
+		}
+
+		regionDataArray[index+1] = fileNameParts[0]
+	}
+
+	return regionDataArray
+}
+
+func getInversedPalette() map[string]int {
+	inversedPalette := make(map[string]int)
+
+	for index, value := range getPalette() {
+		inversedPalette[value] = index
+	}
+
+	return inversedPalette
 }
 
 func getRegionsList() []Region {
@@ -197,20 +211,20 @@ func getStoragePath(subPath string) (string, error) {
 	return subbedPath, err
 }
 
-func getCachedChunkData(region Region) []Chunk {
-	var cachedChunkData []Chunk
+func getCachedBlockData(region Region) ([]int, error) {
+	var cachedBlockData []int = make([]int, 32*32*16*16)
 
 	filePath, _ := getStoragePath(fmt.Sprintf("cache/region.%d.%d.json", region.PosX, region.PosZ))
 	file, error := os.OpenFile(filePath, os.O_RDONLY, os.ModePerm)
 
 	if error == nil {
-		json.NewDecoder(file).Decode(&cachedChunkData)
+		json.NewDecoder(file).Decode(&cachedBlockData)
 	}
 
-	return cachedChunkData
+	return cachedBlockData, error
 }
 
-func setCachedChunkData(region Region, chunkData []Chunk) {
+func setCachedBlockData(region Region, blockData []int) {
 	cachePath, error := getStoragePath("cache")
 
 	if os.IsNotExist(error) {
@@ -227,7 +241,7 @@ func setCachedChunkData(region Region, chunkData []Chunk) {
 	defer file.Close()
 
 	file.Truncate(0)
-	json.NewEncoder(file).Encode(chunkData)
+	json.NewEncoder(file).Encode(blockData)
 }
 
 func convertToBitString(bytes []byte) string {
@@ -243,17 +257,16 @@ func convertToBitString(bytes []byte) string {
 	return bitString
 }
 
-func getChunkData(regions <-chan Region, results chan<- []Chunk, wg *sync.WaitGroup) {
+func getChunkData(regions <-chan Region, wg *sync.WaitGroup) {
 	// Decreasing internal counter for wait-group as soon as goroutine finishes
 	defer wg.Done()
 
-	var chunkDataArray []Chunk
+	internalPalette := getInversedPalette()
 
 	for region := range regions {
-		chunkDataForRegion := getCachedChunkData(region)
+		blockDataForRegion, error := getCachedBlockData(region)
 
-		if len(chunkDataForRegion) > 0 {
-			chunkDataArray = append(chunkDataArray, chunkDataForRegion...)
+		if error == nil {
 			continue
 		}
 
@@ -267,6 +280,8 @@ func getChunkData(regions <-chan Region, results chan<- []Chunk, wg *sync.WaitGr
 		}
 
 		for chunkIndex := range 1024 {
+			fmt.Println(chunkIndex)
+
 			// The first header block contains the locations of chunk data in the file. Each chunk location is expressed by 3 bytes, and 1 sector count byte.
 			var chunkDataOffsetInSectors uint32 = int24BinaryToInt32(regionFileData[chunkIndex*4 : chunkIndex*4+3])
 
@@ -304,15 +319,13 @@ func getChunkData(regions <-chan Region, results chan<- []Chunk, wg *sync.WaitGr
 			error = nbt.Unmarshal(chunkData, &chunk)
 
 			// Get the x,z locations of this chunk
-			var xPos = chunk["xPos"]
-			var zPos = chunk["zPos"]
+			var chunkX = chunk["xPos"].(int32)
+			var chunkZ = chunk["zPos"].(int32)
 
 			// Get the sections of this chunk
 			var sections = chunk["sections"].([]interface{})
 
-			paletteCounts := make(map[string]int)
-
-			chunkBlockTypes := make([]string, 16*16)
+			// paletteCounts := make(map[string]int)
 
 			// Iterate over the sections of this chunk
 			for i := len(sections) - 1; i > 0; i-- {
@@ -333,12 +346,27 @@ func getChunkData(regions <-chan Region, results chan<- []Chunk, wg *sync.WaitGr
 
 				for x := range 16 {
 					for z := range 16 {
-						// a block (with presumable a higher y-value) was already loaded for these x,z coords.
-						if chunkBlockTypes[(z*16)+x] != "" {
-							fmt.Println("test")
-							continue
+						var chunkXInRegion int32
+						var chunkZInRegion int32
+
+						if chunkX < 0 {
+							chunkXInRegion = 31 - (int32(math.Abs(float64(chunkX))) % 32)
 						} else {
-							fmt.Println("tes2")
+							chunkXInRegion = chunkX % 32
+						}
+
+						if chunkZ < 0 {
+							chunkZInRegion = 31 - (int32(math.Abs(float64(chunkZ))) % 32)
+						} else {
+							chunkZInRegion = chunkZ % 32
+						}
+
+						blockXInRegion := int(chunkXInRegion*16) + x
+						blockZInRegion := int(chunkZInRegion*16) + z
+
+						// a block (with presumable a higher y-value) was already loaded for these x,z coords.
+						if blockDataForRegion[(blockZInRegion*32*16)+blockXInRegion] != 0 {
+							continue
 						}
 
 						for y := range 16 {
@@ -351,114 +379,23 @@ func getChunkData(regions <-chan Region, results chan<- []Chunk, wg *sync.WaitGr
 							b := make([]byte, 8)
 							binary.BigEndian.PutUint64(b, targetInt64)
 							bitString := convertToBitString(b)
-							// fmt.Println(bitString)
 
 							myBlockPalette := bitString[64-blockInfoForCoordsBitIndexLocal-indexSizeInBits : 64-blockInfoForCoordsBitIndexLocal]
 
 							myPaletteIndex, _ := strconv.ParseInt(myBlockPalette, 2, 0)
 							blockType := blockPalette.([]interface{})[myPaletteIndex].(map[string]interface{})["Name"]
 
-							// fmt.Println(myPaletteIndex)
-							// fmt.Println(blockType)
+							if blockType.(string) != "minecraft:air" {
+								trimmedBlockType := blockType.(string)[10:len(blockType.(string))]
 
-							if blockType != "minecraft:air" {
-								chunkBlockTypes[(z*16)+x] = blockType.(string)
+								blockDataForRegion[(blockZInRegion*32*16)+blockXInRegion] = internalPalette[trimmedBlockType]
 							}
 						}
 					}
 				}
-
-				// Info from https://minecraft.fandom.com/wiki/Chunk_format:
-				// - Packed array of 4096 indices, stored in an array of 64-bit ints.
-				// - If only one block state is present in the palette, this field is not required and the block fills the whole section.
-				// - All indices are the same length: the minimum amount of bits required to represent the largest index in the palette.
-				// - These indices have a minimum size of 4 bits.
-				// - Since 1.16, the indices are not packed across multiple elements of the array, meaning that if there is no more space in
-				//   a given 64-bit integer for the next index, it starts instead at the first (lowest) bit of the next 64-bit element.
-
-				// Info from https://wiki.vg/Chunk_Format#Paletted_Container_structure:
-				// - Chunk sections
-				//   - Chunk sections are 16x16x16 collections of blocks.
-				//   - Chunk sections store blocks, biomes and light data (both block light and sky light).
-				//   - Chunk sections can be associated with at most two palettes — one for blocks, one for biomes.
-				//   - Chunk sections can contain at maximum 4096 (16×16×16, or 212) unique block state IDs, and 64 (4×4×4) unique biome IDs (highly unlikely).
-				// - Registries
-				//   - The registries are the primary, protocol-wide mappings from block states and biomes to numeric identifiers.
-				//   - The block state registry is hardcoded into Minecraft.
-				//   - One block state ID is allocated for each unique block state of a block
-				//   - If a block has multiple properties then the number of allocated states is the product of the number of values for each property.
-				//   - The block state IDs belonging to a given block are always consecutive. Other than that, the ordering of block states is hardcoded, and somewhat arbitrary.
-				//   - The Data Generators system can be used to generate a list of all block state IDs.
-				//   - The biome registry is defined at runtime as part of the Registry Data packet sent by the server during the Configuration phase.
-				//   - The Notchian server pulls these biome definitions from data packs.
-				// - Palettes
-				//   - A palette maps a smaller set of IDs within a chunk section to registry IDs
-				//   - For example:
-				//     - Encoding any of the IDs in the block state registry as of vanilla 1.20.2 requires 15 bits.
-				//     - Given that most sections contain only a few different blocks, using 15 bits per block to represent a chunk section that is
-				//       only stone, gravel, and air would be extremely wasteful. Instead, a list of registry IDs is sent (for instance, 40 57 0),
-				//       and indices into that list — the palette — are sent as the block state or biome values within the chunk (so 40 would be sent
-				//       as 0, 57 as 1, and 0 as 2)
-				//     - The number of bits used to encode palette indices varies based on the number of indices, and the registry in question.
-				//     - If a threshold on the number of unique IDs in the section is exceeded, a palette is not used, and registry IDs are used directly instead.
-				// - Heightmaps
-				//   - Minecraft uses heightmaps to optimize various operations on both the server and the client.
-				//   - All heightmaps share the basic structure of encoding the position of the highest "occupied" block in each column of blocks within a chunk
-				//     column. The differences have to do with which blocks are considered to be "occupied".
-				//   - Rather than calculating them from the chunk data, the client receives the initial heightmaps it needs from the server. This trades an
-				//     increase in network usage for a decrease in client-side processing. Once a chunk is loaded, the client updates its heightmaps based on
-				//     block changes independently from the server.
-
-				// // Get the biomes of this chunk
-				// var biomes = section.(map[string]interface{})["biomes"]
-
-				// if biomes == nil {
-				// 	continue
-				// }
-
-				// // Get the palette of this biome
-				// var palettes = biomes.(map[string]interface{})["palette"]
-
-				// if palettes == nil {
-				// 	continue
-				// }
-
-				// // Iterate over the palette of this biome
-				// for _, palette := range palettes.([]interface{}) {
-				// 	// Log the occurence of the biome string in the palette
-				// 	paletteCounts[palette.(string)] += 1
-				// }
 			}
-
-			var mostOftOcurringBiome string
-
-			// Determine the most dominant biome in this chunk
-			for biome, ocurrences := range paletteCounts {
-				if mostOftOcurringBiome == "" {
-					mostOftOcurringBiome = biome
-				} else if ocurrences > paletteCounts[mostOftOcurringBiome] {
-					mostOftOcurringBiome = biome
-				}
-			}
-
-			biomeIndex := "-1"
-
-			for index, biomeData := range BiomeColors {
-				if biomeData.Biome == mostOftOcurringBiome {
-					biomeIndex = index
-				}
-			}
-
-			chunkDataForRegion = append(chunkDataForRegion, Chunk{
-				X:           int(xPos.(int32)),
-				Z:           int(zPos.(int32)),
-				BiomeNumber: biomeIndex,
-			})
 		}
 
-		// setCachedChunkData(region, chunkDataForRegion)
-		chunkDataArray = append(chunkDataArray, chunkDataForRegion...)
+		setCachedBlockData(region, blockDataForRegion)
 	}
-
-	results <- chunkDataArray
 }

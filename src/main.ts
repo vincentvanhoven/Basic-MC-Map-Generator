@@ -7,11 +7,10 @@ import CacheManager from './CacheManager';
 
 class MapHandler {
     private cache: CacheManager = new CacheManager();
-    private chunks: Chunk[] = [];
-    private apiChunksPageSize: number = 25;
-    private renderTileSize: number = 1;
+    private renderTileSize: number = 16;
     private regions: Region[] = [];
-    private palette: any[] = [];
+    private loadedImages: {[key:string]: HTMLImageElement} = {};
+    private palette: {[key:number]: string} = [];
     private canvas: HTMLCanvasElement;
     private canvasContext: CanvasRenderingContext2D;
     private imageCreationCanvas: HTMLCanvasElement;
@@ -45,8 +44,6 @@ class MapHandler {
     }
 
     async fetchAllRegions() {
-        console.time('start');
-        
         await fetch('/regionslist')
             .then((response) => {
                 return response.json();
@@ -60,105 +57,93 @@ class MapHandler {
                 return response.json()
             })
             .then(async (json) => {
-                console.log(this.palette)
                 this.palette = json;
-            })
-            
-        let totalAPIPages = Math.ceil(this.regions.length / this.apiChunksPageSize)
-        
-        for(let pageCount = 0; pageCount < totalAPIPages; pageCount++) {
-            await this.fetchChunks(pageCount);
+            });
+    
+        for(let index = 0; index < this.regions.length; index++) {
+            await this.fetchBlockData(this.regions[index]);
         }
 
-        console.log(`Fetched ${this.chunks.length} chunks. This is how long the operation took:`);
+        console.log(`Fetched ${this.regions.length} regions. This is how long the operation took:`);
         console.timeEnd('start');
     }
 
-    async fetchChunks(page: number) {
-        return fetch(`/chunkdata?per_page=${this.apiChunksPageSize}&page=${page}`)
+    async fetchBlockData(region: Region) {
+        return fetch(`/blockdata?region_x=${region.PosX}&region_z=${region.PosZ}`)
             .then((response) => {
                 return response.json();
             })
             .then((json) => {
-                let chunkData: Chunk[] = [];
-
-                Object.keys(json).forEach((biomeKey) => {
-                    let chunksForBiomeKey = json[biomeKey];
-
-                    chunksForBiomeKey.forEach((chunkCoords: {X: number, Z: number}) => {
-                        chunkData.push({
-                            PosX: chunkCoords.X,
-                            PosZ: chunkCoords.Z,
-                            Biome: this.palette[parseInt(biomeKey)].Biome,
-                            Color: this.palette[parseInt(biomeKey)].Color,
-                        })
-                    })
-                })
-
-                this.generateRegionImages(chunkData);
-
-                this.chunks = [...this.chunks, ...chunkData]
+                region.blockStates = json;
+                // this.generateRegionImages(region, json);
             })
             .catch((err) => {
                 console.error(err)
             });
     }
 
-    async generateRegionImages(newChunks: Chunk[]) {
-        let chunksGroupedPerRegion = Object.groupBy(newChunks, (chunk: Chunk) => {
-            return `${Math.floor(chunk.PosX/32)}-${Math.floor(chunk.PosZ/32)}`.toString();
-        });
+    // async generateRegionImages(region: Region, blockData: number[]) {
+            // let imageBuffer = new Uint8ClampedArray(32 * 32 * 16 * 16 * 4);
 
-        Object.keys(chunksGroupedPerRegion).forEach((regionKey) => {
-            let chunksInRegion: Chunk[] = chunksGroupedPerRegion[regionKey] ?? [];
-            let region = this.regions.find((region: Region) => {
-                let targetRegionX = Math.floor(chunksInRegion?.[0]?.PosX / 32);
-                let targetRegionZ = Math.floor(chunksInRegion?.[0]?.PosZ / 32);
+            // let regionWidthHeight = 32*32*16*16;
 
-                return region.PosX === targetRegionX && region.PosZ === targetRegionZ;
-            })
+            // blockData.forEach((value, index) => {
+            //     let blockZInRegion = Math.floor(index / regionWidthHeight);
+            //     let blockXInRegion = index % regionWidthHeight;
 
-            if(!region) {
-                return;
-            }
+            //     // console.log(this.palette[value])
 
-            let imageBuffer = new Uint8ClampedArray(32 * 32 * 4);
+            //     let color = [255,255,255]
 
-            chunksInRegion.forEach((chunk) => {
-                let chunkX = chunk.PosX % 32;
-                let chunkZ = chunk.PosZ % 32;
+            //     if(this.palette[value] === "stone") {
+            //         color = [175,175,175]
+            //     } else if (this.palette[value] === "grass") {
+            //         console.log("test")
+            //     }
 
-                // Translate to local (region) coordinates
-                if(chunkX < 0) {
-                    chunkX += 32;
-                }
-                if(chunkZ < 0) {
-                    chunkZ += 32;
-                }
+            //     region
 
-                // Flip the z location (to flip the image upside down)
-                chunkZ = 31 - chunkZ;
+            //     imageBuffer[index*4] = color[0];
+            //     imageBuffer[(index*4)+1] = color[1];
+            //     imageBuffer[(index*4)+2] = color[2];
+            //     imageBuffer[(index*4)+3] = 255;
+            // });
 
-                let pos = ((chunkZ * 32) + chunkX) * 4;
+            // chunksInRegion.forEach((chunk) => {
+            //     let chunkX = chunk.PosX % 32;
+            //     let chunkZ = chunk.PosZ % 32;
 
-                // This data is in rgba format
-                imageBuffer[pos] = parseInt(chunk.Color[0]);
-                imageBuffer[pos+1] = parseInt(chunk.Color[1]);
-                imageBuffer[pos+2] = parseInt(chunk.Color[2]);
-                imageBuffer[pos+3] = 255;
-            });
+            //     // Translate to local (region) coordinates
+            //     if(chunkX < 0) {
+            //         chunkX += 32;
+            //     }
+            //     if(chunkZ < 0) {
+            //         chunkZ += 32;
+            //     }
 
-            let imageData = this.canvasContext.createImageData(32, 32);
-            imageData.data.set(imageBuffer);
+            //     // Flip the z location (to flip the image upside down)
+            //     chunkZ = 31 - chunkZ;
 
-            this.imageCreationCanvasContext.clearRect(0, 0, this.imageCreationCanvas.width, this.imageCreationCanvas.height);
-            this.imageCreationCanvasContext.putImageData(imageData, 0, 0);
+            //     let pos = ((chunkZ * 32) + chunkX) * 4;
 
-            region.image = new Image();
-            region.image.src = this.imageCreationCanvas.toDataURL();
-        });
+            //     // This data is in rgba format
+            //     imageBuffer[pos] = parseInt(chunk.Color[0]);
+            //     imageBuffer[pos+1] = parseInt(chunk.Color[1]);
+            //     imageBuffer[pos+2] = parseInt(chunk.Color[2]);
+            //     imageBuffer[pos+3] = 255;
+            // });
 
-    }
+            // let imageData = this.canvasContext.createImageData(regionWidthHeight, 32);
+            // imageData.data.set(imageBuffer);
+
+            // this.imageCreationCanvasContext.clearRect(0, 0, this.imageCreationCanvas.width, this.imageCreationCanvas.height);
+            // this.imageCreationCanvasContext.putImageData(imageData, 0, 0);
+
+            // region.image = new Image();
+            // region.image.src = this.imageCreationCanvas.toDataURL();
+        // });
+
+    // }
 
     onResizeEvent(_event: Event) {
         this.canvas.width = window.innerWidth;
@@ -184,29 +169,7 @@ class MapHandler {
     }
 
     onWheelEvent(event: WheelEvent) {
-        // let translatedMouseCoordsBefore: Vector = new Vector(
-        //     (event.clientX + this.dragOffsetInPx.x) * (this.zoomLevel / 1000),
-        //     (event.clientY + this.dragOffsetInPx.y) * (this.zoomLevel / 1000),
-        // )
-
-        // Scrolling down should make the zoom 'smaller' (so to speak) but results in a positive deltaY, hence the subtraction here to flip the value.
         this.zoomLevel -= event.deltaY;
-
-        // let translatedMouseCoordsAfter: Vector = new Vector(
-        //     (event.clientX + this.dragOffsetInPx.x) * (this.zoomLevel / 1000),
-        //     (event.clientY + this.dragOffsetInPx.y) * (this.zoomLevel / 1000),
-        // );
-
-        // let diff: Vector = new Vector(
-        //     translatedMouseCoordsAfter.x - translatedMouseCoordsBefore.x,
-        //     translatedMouseCoordsAfter.y - translatedMouseCoordsBefore.y,
-        // )
-
-        // // TODO: This currently drifts a little...
-        // this.dragOffsetInPx.x -= diff.x / (this.zoomLevel / 1000);
-        // this.dragOffsetInPx.y -= diff.y / (this.zoomLevel / 1000);
-
-        // this.cache.purgeAll();
     }
 
     getCanvasCenterOffset(): Vector {
@@ -260,7 +223,7 @@ class MapHandler {
         let totalOffset: Vector = this.getTotalChunkOffset();
 
         this.regions.forEach((region: Region) => {
-            if(!region.image) {
+            if(!region.blockStates) {
                 return;
             }
 
@@ -269,7 +232,24 @@ class MapHandler {
             regionRenderPos.multiply(32).multiply(this.renderTileSize).add(totalOffset);
             regionRenderPos.y -= 32;
 
-            this.canvasContext.drawImage(region.image, Math.round(regionRenderPos.x), Math.round(regionRenderPos.y));
+            region.blockStates.forEach((paletteIndex, blockIndex) => {
+                let blockState = this.palette[paletteIndex];
+
+                if(!this.loadedImages[blockState]) {
+                    this.loadedImages[blockState] = new Image();
+                    this.loadedImages[blockState].src = `blocks/${blockState}.png`;
+                } else {
+                    let regionWidthHeight = 32*32*16*16;
+                    let blockRenderPos = new Vector(
+                        (blockIndex % regionWidthHeight) * this.renderTileSize,
+                        Math.floor(blockIndex / regionWidthHeight)* this.renderTileSize,
+                    ).add(regionRenderPos);
+
+                    this.canvasContext.drawImage(this.loadedImages[blockState], blockRenderPos.x, blockRenderPos.y);
+                }
+            })
+
+            // this.canvasContext.drawImage(region.image, Math.round(regionRenderPos.x), Math.round(regionRenderPos.y));
         });
 
         this.canvasContext.restore();
