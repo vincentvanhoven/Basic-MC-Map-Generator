@@ -65,9 +65,6 @@ class MapHandler {
         for(let index = 0; index < this.regions.length; index++) {
             await this.fetchBlockData(this.regions[index]);
         }
-
-        console.log(`Fetched ${this.regions.length} regions. This is how long the operation took:`);
-        console.timeEnd('start');
     }
 
     async fetchBlockData(region: Region) {
@@ -77,10 +74,10 @@ class MapHandler {
             })
             .then((json) => {
                 region.blockStates = json;
-                // this.generateRegionImages(region, json);
+                return json;
             })
             .catch((err) => {
-                console.error(err)
+                throw err;
             });
     }
 
