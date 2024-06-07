@@ -163,29 +163,48 @@ class MapHandler {
                 return;
             }
 
-            // Subtracting 32 from the Z startpos, because the coordinate flipping otherwise messes up the outlining
-            let regionRenderPos: Vector = new Vector(region.PosX, -region.PosZ);
-            regionRenderPos.multiply(32).multiply(this.renderTileSize).add(totalOffset);
-            regionRenderPos.y -= 32;
+            let regionWidthHeight = 32*16;
+            let regionRenderSize = regionWidthHeight * this.renderTileSize;
+            let regionRenderPos: Vector = new Vector(region.PosX, region.PosZ);
+            regionRenderPos.multiply(regionRenderSize).add(totalOffset);
+
+            if(
+                regionRenderPos.x + regionRenderSize < 0
+                || regionRenderPos.x > this.canvas.clientWidth
+                || regionRenderPos.y + regionRenderSize < 0
+                || regionRenderPos.y > this.canvas.clientHeight
+            ) {
+                return;
+            }
+
 
             region.blockStates.forEach((paletteIndex, blockIndex) => {
                 let blockState = this.palette[paletteIndex];
 
-                if(!this.loadedImages[blockState]) {
-                    this.loadedImages[blockState] = new Image();
-                    this.loadedImages[blockState].src = `blocks/${blockState}.png`;
-                } else {
-                    let regionWidthHeight = 32*32*16*16;
-                    let blockRenderPos = new Vector(
-                        (blockIndex % regionWidthHeight) * this.renderTileSize,
-                        Math.floor(blockIndex / regionWidthHeight)* this.renderTileSize,
-                    ).add(regionRenderPos);
+                if(blockState) {
+                    if(!this.loadedImages[blockState]) {
+                        this.loadedImages[blockState] = new Image();
+                        this.loadedImages[blockState].src = `resourcepack/textures/block/${blockState}.png`;
+                    } else {
+                        let blockRenderPos = new Vector(
+                            (blockIndex % regionWidthHeight) * this.renderTileSize,
+                            Math.floor(blockIndex / regionWidthHeight) * this.renderTileSize,
+                        ).add(regionRenderPos);
 
-                    this.canvasContext.drawImage(this.loadedImages[blockState], blockRenderPos.x, blockRenderPos.y);
+                        if(((blockIndex % regionWidthHeight) * this.renderTileSize) % 1 > 0) {
+                            console.log((blockIndex % regionWidthHeight) * this.renderTileSize)
+                        }
+
+                        this.canvasContext.drawImage(this.loadedImages[blockState], blockRenderPos.x, blockRenderPos.y);
+                    }
                 }
-            })
-
-            // this.canvasContext.drawImage(region.image, Math.round(regionRenderPos.x), Math.round(regionRenderPos.y));
+            });
+        
+            this.canvasContext.fillStyle = `red`;
+            this.canvasContext.beginPath();
+            this.canvasContext.moveTo(regionRenderPos.x + (regionWidthHeight*this.renderTileSize), regionRenderPos.y);
+            this.canvasContext.lineTo(regionRenderPos.x, regionRenderPos.y + (regionWidthHeight*this.renderTileSize));
+            this.canvasContext.stroke();
         });
 
         this.canvasContext.restore();
