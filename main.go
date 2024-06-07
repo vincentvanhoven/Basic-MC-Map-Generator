@@ -86,16 +86,16 @@ func readAllRegionFiles() {
 	wg := new(sync.WaitGroup)
 	jobs := make(chan Region)
 
-	wg.Add(1)
+	wg.Add(config.BackgroundWorkersCount)
 
 	// Add workers
-	for w := 1; w <= 1; w++ {
+	for w := 1; w <= config.BackgroundWorkersCount; w++ {
 		go getChunkData(jobs, wg)
 	}
 
 	// Queue jobs
 	go func() {
-		for _, region := range getRegionsList()[0:1] {
+		for _, region := range getRegionsList() {
 			jobs <- region
 		}
 		close(jobs)
@@ -108,8 +108,9 @@ func readAllRegionFiles() {
 
 func loadConfig() {
 	var defaultConfig Config = Config{
-		PathToWorld:   "c:/users/vincent/desktop/mc server/anarchy/world",
-		WebserverPort: 8181,
+		PathToWorld:            "c:/users/vincent/desktop/mc server/anarchy/world",
+		WebserverPort:          8181,
+		BackgroundWorkersCount: 10,
 	}
 
 	filePath, error := getStoragePath("config.json")
