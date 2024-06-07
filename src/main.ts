@@ -30,7 +30,9 @@ class MapHandler {
 
         this.fetchAllRegions();
 
-        window.setInterval(this.render.bind(this), 1000/60);
+        // window.setInterval(this.render.bind(this), 1000/60);
+        window.setInterval(this.render.bind(this), 1000/1);
+
         window.addEventListener('resize', this.onResizeEvent.bind(this));
         window.addEventListener('mousedown', this.onMouseDownEvent.bind(this));
         window.addEventListener('mousemove', this.onMouseMoveEvent.bind(this));
