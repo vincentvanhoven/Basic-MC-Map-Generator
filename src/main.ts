@@ -81,69 +81,6 @@ class MapHandler {
             });
     }
 
-    // async generateRegionImages(region: Region, blockData: number[]) {
-            // let imageBuffer = new Uint8ClampedArray(32 * 32 * 16 * 16 * 4);
-
-            // let regionWidthHeight = 32*32*16*16;
-
-            // blockData.forEach((value, index) => {
-            //     let blockZInRegion = Math.floor(index / regionWidthHeight);
-            //     let blockXInRegion = index % regionWidthHeight;
-
-            //     // console.log(this.palette[value])
-
-            //     let color = [255,255,255]
-
-            //     if(this.palette[value] === "stone") {
-            //         color = [175,175,175]
-            //     } else if (this.palette[value] === "grass") {
-            //         console.log("test")
-            //     }
-
-            //     region
-
-            //     imageBuffer[index*4] = color[0];
-            //     imageBuffer[(index*4)+1] = color[1];
-            //     imageBuffer[(index*4)+2] = color[2];
-            //     imageBuffer[(index*4)+3] = 255;
-            // });
-
-            // chunksInRegion.forEach((chunk) => {
-            //     let chunkX = chunk.PosX % 32;
-            //     let chunkZ = chunk.PosZ % 32;
-
-            //     // Translate to local (region) coordinates
-            //     if(chunkX < 0) {
-            //         chunkX += 32;
-            //     }
-            //     if(chunkZ < 0) {
-            //         chunkZ += 32;
-            //     }
-
-            //     // Flip the z location (to flip the image upside down)
-            //     chunkZ = 31 - chunkZ;
-
-            //     let pos = ((chunkZ * 32) + chunkX) * 4;
-
-            //     // This data is in rgba format
-            //     imageBuffer[pos] = parseInt(chunk.Color[0]);
-            //     imageBuffer[pos+1] = parseInt(chunk.Color[1]);
-            //     imageBuffer[pos+2] = parseInt(chunk.Color[2]);
-            //     imageBuffer[pos+3] = 255;
-            // });
-
-            // let imageData = this.canvasContext.createImageData(regionWidthHeight, 32);
-            // imageData.data.set(imageBuffer);
-
-            // this.imageCreationCanvasContext.clearRect(0, 0, this.imageCreationCanvas.width, this.imageCreationCanvas.height);
-            // this.imageCreationCanvasContext.putImageData(imageData, 0, 0);
-
-            // region.image = new Image();
-            // region.image.src = this.imageCreationCanvas.toDataURL();
-        // });
-
-    // }
-
     onResizeEvent(_event: Event) {
         this.canvas.width = window.innerWidth;
         this.canvas.height = window.innerHeight;
