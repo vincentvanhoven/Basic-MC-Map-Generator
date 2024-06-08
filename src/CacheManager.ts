@@ -1,6 +1,16 @@
 export default class CacheManager {
     private cache: {[key:string]: any} = {};
 
+    static instance: CacheManager;
+
+    constructor() {
+        if (CacheManager.instance) {
+            return CacheManager.instance
+        }
+
+        CacheManager.instance = this
+    }
+
     set(key: string, value: any) {
         this.cache[key] = value;
     }
