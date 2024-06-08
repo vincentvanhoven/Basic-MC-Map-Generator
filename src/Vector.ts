@@ -27,4 +27,11 @@ export default class Vector {
 
         return this;
     }
+
+    divide(vector: Vector|number) {
+        this.x /= typeof vector === 'object' ? vector.x : vector;
+        this.y /= typeof vector === 'object' ? vector.y : vector;
+
+        return this;
+    }
 }
