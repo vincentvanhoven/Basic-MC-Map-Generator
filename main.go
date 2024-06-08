@@ -90,7 +90,7 @@ func readAllRegionFiles() {
 
 	// Add workers
 	for w := 1; w <= config.BackgroundWorkersCount; w++ {
-		go getChunkData(jobs, wg)
+		go getRegionData(jobs, wg)
 	}
 
 	// Queue jobs
@@ -258,7 +258,7 @@ func convertToBitString(bytes []byte) string {
 	return bitString
 }
 
-func getChunkData(regions <-chan Region, wg *sync.WaitGroup) {
+func getRegionData(regions <-chan Region, wg *sync.WaitGroup) {
 	// Decreasing internal counter for wait-group as soon as goroutine finishes
 	defer wg.Done()
 
@@ -320,217 +320,119 @@ func getChunkData(regions <-chan Region, wg *sync.WaitGroup) {
 				var chunk map[string]interface{}
 				error = nbt.Unmarshal(chunkData, &chunk)
 
-				// Get the lowest Y section position in the chunk
-				chunkLowestYSectionPos := chunk["yPos"].(int32)
-
-				// Get the sections of this chunk
-				var sections = chunk["sections"].([]interface{})
-				var motionBlockingHeightMap = chunk["Heightmaps"].(map[string]interface{})["MOTION_BLOCKING"]
-
-				if motionBlockingHeightMap == nil {
-					// This chunk ain't ready
-					continue
-				}
-
-				indexSizeInBits := 4
-
-				for blockX := range 16 {
-					for blockZ := range 16 {
-						// Calculate the offsets for the heightmap location of the current block X/Z coords
-						blockIndex := (blockX) + (blockZ << 4)
-						blockIndexInHeightMap := blockIndex / 7
-						blockIndexInHeightMapValue := blockIndex % 7
-
-						// Read the heightmap location
-						b := make([]byte, 8)
-						binary.BigEndian.PutUint64(b, uint64(motionBlockingHeightMap.([]int64)[blockIndexInHeightMap]))
-						bitString := convertToBitString(b)
-
-						blockByteIndexStart := len(bitString) - ((blockIndexInHeightMapValue + 1) * 9)
-						blockHeightMapValueString := bitString[blockByteIndexStart:(blockByteIndexStart + 9)]
-
-						blockHeightMapValue, _ := strconv.ParseUint(blockHeightMapValueString, 2, 0)
-
-						// highestBlockY = (chunk.yPos * 16) - 1 + heightmap_entry_value
-						blockHeightValue := (int(chunkLowestYSectionPos) * 16) - 1 + int(blockHeightMapValue)
-
-						if blockHeightValue < int(chunkLowestYSectionPos) {
-							continue
-						}
-
-						blockSectionIndex := int8(blockHeightValue / 16)
-
-						var blockIndeInSection int
-						if blockHeightValue >= 0 {
-							blockIndeInSection = blockHeightValue % 16
-						} else {
-							blockIndeInSection = (16 + (blockHeightValue % 16)) % 16
-						}
-
-						var blockSection map[string]interface{}
-						for _, section := range sections {
-							if section.(map[string]interface{})["Y"].(int8) == blockSectionIndex {
-								blockSection = section.(map[string]interface{})
-							}
-						}
-
-						blockStates := blockSection["block_states"]
-
-						if blockStates == nil {
-							fmt.Printf(
-								"blockstates are nill at region (%d,%d), chunk (%d,%d), block (%d, %d), heightvalue (%d), section (%d), blockinsection (%d)\n",
-								region.PosX,
-								region.PosZ,
-								chunkX,
-								chunkZ,
-								blockX,
-								blockZ,
-								blockHeightValue,
-								blockSectionIndex,
-								blockIndeInSection,
-							)
-							continue
-						}
-
-						blockData := blockStates.(map[string]interface{})["data"]
-						blockPalette := blockStates.(map[string]interface{})["palette"]
-
-						if blockData == nil {
-							fmt.Printf(
-								"blockData is nill at region (%d,%d), chunk (%d,%d), block (%d, %d), heightvalue (%d), section (%d), blockinsection (%d)\n",
-								region.PosX,
-								region.PosZ,
-								chunkX,
-								chunkZ,
-								blockX,
-								blockZ,
-								blockHeightValue,
-								blockSectionIndex,
-								blockIndeInSection,
-							)
-							continue
-						}
-
-						blockInfoForCoordsBitIndexGlobal := ((blockIndeInSection * 16 * 16) + (blockZ * 16) + (blockX)) * indexSizeInBits
-						targetInt64Index := blockInfoForCoordsBitIndexGlobal / 64
-						blockInfoForCoordsBitIndexLocal := blockInfoForCoordsBitIndexGlobal - (targetInt64Index * 64)
-
-						if targetInt64Index < 0 {
-							fmt.Printf(
-								"issue at region (%d,%d), chunk (%d,%d), block (%d, %d), heightvalue (%d), section (%d), blockinsection (%d)\n",
-								region.PosX,
-								region.PosZ,
-								chunkX,
-								chunkZ,
-								blockX,
-								blockZ,
-								blockHeightValue,
-								blockSectionIndex,
-								blockIndeInSection,
-							)
-						}
-
-						targetInt64 := uint64(blockData.([]int64)[targetInt64Index])
-
-						b = make([]byte, 8)
-						binary.BigEndian.PutUint64(b, targetInt64)
-						bitString = convertToBitString(b)
-
-						myBlockPalette := bitString[64-blockInfoForCoordsBitIndexLocal-indexSizeInBits : 64-blockInfoForCoordsBitIndexLocal]
-
-						myPaletteIndex, _ := strconv.ParseInt(myBlockPalette, 2, 0)
-						blockType := blockPalette.([]interface{})[myPaletteIndex].(map[string]interface{})["Name"]
-
-						if blockType.(string) != "minecraft:air" && blockType.(string) != "minecraft:cave_air" {
-							trimmedBlockType := blockType.(string)[10:len(blockType.(string))]
-
-							var paletteIndex int = internalPalette[fmt.Sprintf("%s_top", trimmedBlockType)]
-
-							if paletteIndex == 0 {
-								paletteIndex = internalPalette[trimmedBlockType]
-
-								if paletteIndex == 0 {
-									// fmt.Printf("%s_top\n", trimmedBlockType)
-								}
-							}
-
-							blockXInRegion := int(chunkX*16) + blockX
-							blockZInRegion := int(chunkZ*16) + blockZ
-
-							blockDataForRegion[(blockZInRegion*32*16)+blockXInRegion] = paletteIndex
-						}
-					}
-				}
-
-				// paletteCounts := make(map[string]int)
-
-				// Iterate over the sections of this chunk
-				// for i := len(sections) - 1; i > 0; i-- {
-
-				// 	fmt.Println(sections)
-				// 	// Get the block_states of this chunk
-				// 	var blockstates = sections[i].(map[string]interface{})["block_states"]
-
-				// 	if blockstates == nil {
-				// 		continue
-				// 	}
-
-				// 	blockData := blockstates.(map[string]interface{})["data"]
-				// 	blockPalette := blockstates.(map[string]interface{})["palette"]
-				// 	indexSizeInBits := 4
-
-				// 	if blockData == nil {
-				// 		continue
-				// 	}
-
-				// 	for x := range 16 {
-				// 		for z := range 16 {
-				// 			blockXInRegion := int(chunkX*16) + x
-				// 			blockZInRegion := int(chunkZ*16) + z
-
-				// 			// a block (with presumable a higher y-value) was already loaded for these x,z coords.
-				// 			if blockDataForRegion[(blockZInRegion*32*16)+blockXInRegion] != 0 {
-				// 				continue
-				// 			}
-
-				// 			for y := range 16 {
-				// 				blockInfoForCoordsBitIndexGlobal := ((y * 16 * 16) + (z * 16) + (x)) * indexSizeInBits
-				// 				targetInt64Index := blockInfoForCoordsBitIndexGlobal / 64
-				// 				blockInfoForCoordsBitIndexLocal := blockInfoForCoordsBitIndexGlobal - (targetInt64Index * 64)
-
-				// 				targetInt64 := uint64(blockData.([]int64)[targetInt64Index])
-
-				// 				b := make([]byte, 8)
-				// 				binary.BigEndian.PutUint64(b, targetInt64)
-				// 				bitString := convertToBitString(b)
-
-				// 				myBlockPalette := bitString[64-blockInfoForCoordsBitIndexLocal-indexSizeInBits : 64-blockInfoForCoordsBitIndexLocal]
-
-				// 				myPaletteIndex, _ := strconv.ParseInt(myBlockPalette, 2, 0)
-				// 				blockType := blockPalette.([]interface{})[myPaletteIndex].(map[string]interface{})["Name"]
-
-				// 				if blockType.(string) != "minecraft:air" && blockType.(string) != "minecraft:cave_air" {
-				// 					trimmedBlockType := blockType.(string)[10:len(blockType.(string))]
-
-				// 					var paletteIndex int = internalPalette[fmt.Sprintf("%s_top", trimmedBlockType)]
-
-				// 					if paletteIndex == 0 {
-				// 						paletteIndex = internalPalette[trimmedBlockType]
-
-				// 						if paletteIndex == 0 {
-				// 							// fmt.Printf("%s_top\n", trimmedBlockType)
-				// 						}
-				// 					}
-
-				// 					blockDataForRegion[(blockZInRegion*32*16)+blockXInRegion] = paletteIndex
-				// 				}
-				// 			}
-				// 		}
-				// 	}
-				// }
+				getBlockDataForChunk(chunk, chunkX, chunkZ, &blockDataForRegion, internalPalette)
 			}
 		}
 
 		setCachedBlockData(region, blockDataForRegion)
+	}
+}
+
+func getBlockDataForChunk(chunk map[string]interface{}, chunkX int, chunkZ int, blockDataForRegion *[]int, internalPalette map[string]int) {
+	// Get the lowest Y section position in the chunk
+	chunkLowestYSectionPos := chunk["yPos"].(int32)
+
+	// Get the sections of this chunk
+	var sections = chunk["sections"].([]interface{})
+	var motionBlockingHeightMap = chunk["Heightmaps"].(map[string]interface{})["MOTION_BLOCKING"]
+
+	if motionBlockingHeightMap == nil {
+		// This chunk ain't ready
+		return
+	}
+
+	indexSizeInBits := 4
+
+	for blockX := range 16 {
+		for blockZ := range 16 {
+			// Calculate the offsets for the heightmap location of the current block X/Z coords
+			blockIndex := (blockX) + (blockZ << 4)
+			blockIndexInHeightMap := blockIndex / 7
+			blockIndexInHeightMapValue := blockIndex % 7
+
+			// Read the heightmap location
+			b := make([]byte, 8)
+			binary.BigEndian.PutUint64(b, uint64(motionBlockingHeightMap.([]int64)[blockIndexInHeightMap]))
+			bitString := convertToBitString(b)
+
+			blockByteIndexStart := len(bitString) - ((blockIndexInHeightMapValue + 1) * 9)
+			blockHeightMapValueString := bitString[blockByteIndexStart:(blockByteIndexStart + 9)]
+
+			blockHeightMapValue, _ := strconv.ParseUint(blockHeightMapValueString, 2, 0)
+
+			// From the wiki: `highestBlockY = (chunk.yPos * 16) - 1 + heightmap_entry_value`
+			blockHeightValue := (int(chunkLowestYSectionPos) * 16) - 1 + int(blockHeightMapValue)
+
+			// The height value may indicate that there is no block in this heightmap for these X,Z coords.
+			if blockHeightValue < int(chunkLowestYSectionPos) {
+				continue
+			}
+
+			// Determine the chunk section that contains the block from the heightmap
+			blockSectionIndex := int8(blockHeightValue / 16)
+
+			// Determine the local chunk section coordinates for the block
+			var blockInTheSection int
+			if blockHeightValue >= 0 {
+				blockInTheSection = blockHeightValue % 16
+			} else {
+				blockInTheSection = (16 + (blockHeightValue % 16)) % 16
+			}
+
+			// Get the chunk section that contains the block from the heightmap
+			var blockSection map[string]interface{}
+			for _, section := range sections {
+				if section.(map[string]interface{})["Y"].(int8) == blockSectionIndex {
+					blockSection = section.(map[string]interface{})
+				}
+			}
+
+			// Fetch the data for this chunk section
+			blockStates := blockSection["block_states"]
+			blockData := blockStates.(map[string]interface{})["data"]
+			blockPalette := blockStates.(map[string]interface{})["palette"]
+
+			// Get the index of the block in a 'flattened' chunk coordinate system
+			blockIndexInData := ((blockInTheSection * 16 * 16) + (blockZ * 16) + (blockX))
+			// Divide by the amount of values packed into each uint64 in the blockData array to get the blockData index
+			blockIndexInPackedData := blockIndexInData / (64 / indexSizeInBits)
+			// Get the remainder to determine the byte index within the uint64 value (from the blockData array) to get the corresponding palette index
+			blockSubIndexInPackedData := blockIndexInData % (64 / indexSizeInBits)
+
+			// Get the packed block data, which is an uint64 containing n amount of pallete indices, with n being:
+			// - 64 bits / minimum amount of bits to represent the largest palette index.
+			// The minimum amount of bits is often 4, resulting in 64/4 = 16 values.
+			packedBlockData := uint64(blockData.([]int64)[blockIndexInPackedData])
+
+			// Extract the relevant bits from the uint64 as follows (assuming an index size of 4):
+			// - Shift the uint64 by n * 4. This results in the desired bits being at the lowest 4 bit indices. Assuming n = 1:
+			//   - Before: 00000000 00110000 00000011 11101111 00001100 10000011 01111111 11110100
+			//   - After:  00000000 00000011 00000000 00111110 11110000 11001000 00110111 11111111
+			// - Apply the AND operator to extract the lowest 4 bits.
+			//   - Before: 00000000 00000011 00000000 00111110 11110000 11001000 00110111 11111111
+			//   - After:  00000000 00000000 00000000 00000000 00000000 00000000 00000000 00001111
+			unpackedBlockData := (packedBlockData >> (blockSubIndexInPackedData * indexSizeInBits)) & ((1 << indexSizeInBits) - 1)
+
+			// Use the extracted palette index to fetch the block type ('minecraft:id' string)
+			blockType := blockPalette.([]interface{})[unpackedBlockData].(map[string]interface{})["Name"]
+
+			// Cut off the 'minecraft:' part of the block type string.
+			trimmedBlockType := blockType.(string)[10:len(blockType.(string))]
+
+			// Attempt to get the `_top` block variant from the palette index
+			var paletteIndex int = internalPalette[fmt.Sprintf("%s_top", trimmedBlockType)]
+
+			// If the `_top` variant does not exist, use normal one instead
+			if paletteIndex == 0 {
+				paletteIndex = internalPalette[trimmedBlockType]
+			}
+
+			// Determine the local region block coordinates
+			blockXInRegion := int(chunkX*16) + blockX
+			blockZInRegion := int(chunkZ*16) + blockZ
+
+			// Write the block palette value to the region data
+			(*blockDataForRegion)[(blockZInRegion*32*16)+blockXInRegion] = paletteIndex
+		}
 	}
 }
