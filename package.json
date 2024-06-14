@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc && vite build",
-    "watch": "vue-tsc && vite build --watch",
+    "watch": "vue-tsc && vite build -m development --watch",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -18,7 +18,7 @@
     "collect.js": "^4.36.1",
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.3",
-    "typescript": "^5.2.2",
+    "typescript": "^5.4",
     "vite": "^5.2.0",
     "vue-tsc": "^2.0.6"
   }
