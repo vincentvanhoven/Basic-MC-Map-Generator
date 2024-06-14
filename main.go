@@ -7,6 +7,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/draw"
+	"image/jpeg"
+	_ "image/png"
+
 	"io/fs"
 	"io/ioutil"
 	"math"
@@ -17,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Tnze/go-mc/nbt"
 )
@@ -25,44 +31,58 @@ import (
 var staticAssets embed.FS
 
 var config Config
+var imageCache map[string]image.Image = make(map[string]image.Image)
 
-func getIntParamWithFallback(r *http.Request, paramName string, fallback int) int {
-	urlParam := r.URL.Query().Get(paramName)
+func getIntPathValue(w http.ResponseWriter, r *http.Request, paramName string) (int, error) {
+	urlParam := r.PathValue(paramName)
 
 	if len(urlParam) > 0 {
-		// parsedInt, error := strconv.Atoi(urlParam)
-		parsedInt, error := strconv.Atoi(urlParam)
+		urlPathParam, error := strconv.Atoi(urlParam)
 
 		if error == nil {
-			return parsedInt
-		} else {
-			fmt.Println(error)
+			return urlPathParam, error
 		}
 	}
 
-	return fallback
+	// Set content & status headers
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+
+	// Prepare a JSON message
+	responseJson := make(map[string]string)
+	responseJson["message"] = fmt.Sprintf("URL path parameter %s must be present and must be numerical.", paramName)
+
+	// Encode the JSON message unto the response
+	json.NewEncoder(w).Encode(responseJson)
+
+	return 0, fmt.Errorf("path param %s is missing", paramName)
 }
 
 func main() {
 	loadConfig()
 	readAllRegionFiles()
+	preloadTileImageCache()
 
 	staticContent, _ := fs.Sub(staticAssets, "static")
 	http.Handle("/", http.FileServer(http.FS(staticContent)))
 
-	http.HandleFunc("/regionslist", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("GET /region/list", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(getRegionsList())
 	})
 
-	http.HandleFunc("/palette", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("GET /palette", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(getPalette())
 	})
 
-	http.HandleFunc("/blockdata", func(w http.ResponseWriter, r *http.Request) {
-		region_x := getIntParamWithFallback(r, "region_x", 0)
-		region_z := getIntParamWithFallback(r, "region_z", 0)
+	http.HandleFunc("GET /region/{region_x}/{region_z}/blockdata", func(w http.ResponseWriter, r *http.Request) {
+		region_x, errorX := getIntPathValue(w, r, "region_x")
+		region_z, errorZ := getIntPathValue(w, r, "region_z")
+
+		if errorX != nil || errorZ != nil {
+			return
+		}
 
 		blockData, error := getCachedBlockData(Region{PosX: region_x, PosZ: region_z})
 
@@ -73,6 +93,27 @@ func main() {
 		} else {
 			json.NewEncoder(w).Encode(make([]int, 0))
 		}
+	})
+
+	http.HandleFunc("GET /region/{region_x}/{region_z}/render", func(w http.ResponseWriter, r *http.Request) {
+		region_x, errorX := getIntPathValue(w, r, "region_x")
+		region_z, errorZ := getIntPathValue(w, r, "region_z")
+
+		if errorX != nil || errorZ != nil {
+			return
+		}
+
+		start := time.Now()
+		image := getRegionImage(Region{PosX: region_x, PosZ: region_z})
+		imageFetchTime := time.Since(start)
+		start = time.Now()
+
+		w.Header().Set("Content-Type", "image/jpeg")
+		jpeg.Encode(w, image, &jpeg.Options{Quality: 10})
+
+		imageEncodeTime := time.Since(start)
+
+		fmt.Printf("fetching: %s. encoding: %s\n", imageFetchTime, imageEncodeTime)
 	})
 
 	http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", config.WebserverPort), nil)
@@ -116,6 +157,7 @@ func loadConfig() {
 		configFile, _ := os.Create(filePath)
 
 		jsonParser := json.NewEncoder(configFile)
+		jsonParser.SetIndent("", "  ")
 		jsonParser.Encode(config)
 
 		fmt.Println("Default config file loaded.")
@@ -411,4 +453,58 @@ func getBlockDataForChunk(chunk map[string]interface{}, chunkX int, chunkZ int, 
 			(*blockDataForRegion)[(blockZInRegion*32*16)+blockXInRegion] = paletteIndex
 		}
 	}
+}
+
+func preloadTileImageCache() {
+	for _, blockName := range getPalette() {
+		blockTexturePath := fmt.Sprintf("static/resourcepack/textures/block/%s.png", blockName)
+
+		f, err := os.Open(blockTexturePath)
+
+		if err != nil {
+			continue
+		}
+
+		defer f.Close()
+		f.Seek(0, 0)
+		blockTexture, _, err := image.Decode(f)
+
+		if err != nil {
+			panic(err)
+		}
+
+		imageCache[blockName] = blockTexture
+	}
+}
+
+func getRegionImage(region Region) *image.RGBA {
+	regionData, _ := getCachedBlockData(region)
+	palette := getPalette()
+
+	// Rectangle for the full image
+	rect := image.Rectangle{image.Point{0, 0}, image.Point{512 * 16, 512 * 16}}
+	// The full image
+	rgba := image.NewRGBA(rect)
+
+	for z := range 512 {
+		for x := range 512 {
+			blockPalleteIndex := regionData[(z*32*16)+x]
+			blockValue := palette[blockPalleteIndex]
+			blockTexture := imageCache[blockValue]
+
+			if blockTexture == nil {
+				continue
+			}
+
+			// starting position for this tile
+			tileStartingPoint := image.Point{blockTexture.Bounds().Dx() * x, blockTexture.Bounds().Dy() * (z)}
+
+			// new rectangle for this tile
+			tileRectangle := image.Rectangle{tileStartingPoint, tileStartingPoint.Add(blockTexture.Bounds().Size())}
+
+			draw.Draw(rgba, tileRectangle, blockTexture, image.Point{0, 0}, draw.Src)
+		}
+	}
+
+	return rgba
 }
