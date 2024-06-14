@@ -22,7 +22,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/Tnze/go-mc/nbt"
 )
@@ -103,17 +102,9 @@ func main() {
 			return
 		}
 
-		start := time.Now()
-		image := getRegionImage(Region{PosX: region_x, PosZ: region_z})
-		imageFetchTime := time.Since(start)
-		start = time.Now()
+		fmt.Printf("READ [cache/jpeg] for region [%d, %d]\n", region_x, region_z)
 
-		w.Header().Set("Content-Type", "image/jpeg")
-		jpeg.Encode(w, image, &jpeg.Options{Quality: 10})
-
-		imageEncodeTime := time.Since(start)
-
-		fmt.Printf("fetching: %s. encoding: %s\n", imageFetchTime, imageEncodeTime)
+		http.ServeFile(w, r, getRegionImagePath(Region{PosX: region_x, PosZ: region_z}))
 	})
 
 	http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", config.WebserverPort), nil)
@@ -257,6 +248,7 @@ func getCachedBlockData(region Region) ([]int, error) {
 	file, error := os.OpenFile(filePath, os.O_RDONLY, os.ModePerm)
 
 	if error == nil {
+		fmt.Printf("READ [cache/json] for region [%d, %d]\n", region.PosX, region.PosZ)
 		json.NewDecoder(file).Decode(&cachedBlockData)
 	}
 
@@ -278,6 +270,8 @@ func setCachedBlockData(region Region, blockData []int) {
 	}
 
 	defer file.Close()
+
+	fmt.Printf("WRITE [cache/json] for region [%d, %d]\n", region.PosX, region.PosZ)
 
 	file.Truncate(0)
 	json.NewEncoder(file).Encode(blockData)
@@ -348,6 +342,7 @@ func getRegionData(regions <-chan Region, wg *sync.WaitGroup) {
 		}
 
 		setCachedBlockData(region, blockDataForRegion)
+		writeRegionImage(region, blockDataForRegion)
 	}
 }
 
@@ -477,8 +472,7 @@ func preloadTileImageCache() {
 	}
 }
 
-func getRegionImage(region Region) *image.RGBA {
-	regionData, _ := getCachedBlockData(region)
+func writeRegionImage(region Region, regionData []int) {
 	palette := getPalette()
 
 	// Rectangle for the full image
@@ -506,5 +500,27 @@ func getRegionImage(region Region) *image.RGBA {
 		}
 	}
 
-	return rgba
+	cachePath, error := getStoragePath("cache")
+
+	if os.IsNotExist(error) {
+		os.Mkdir(cachePath, os.ModePerm)
+	}
+
+	filePath, _ := getStoragePath(fmt.Sprintf("cache/region.%d.%d.jpeg", region.PosX, region.PosZ))
+	file, error := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, os.ModePerm)
+
+	if error != nil {
+		panic(error)
+	}
+
+	defer file.Close()
+
+	fmt.Printf("WRITE [cache/jpeg] for region [%d, %d]\n", region.PosX, region.PosZ)
+
+	file.Truncate(0)
+	jpeg.Encode(file, rgba, &jpeg.Options{Quality: 10})
+}
+
+func getRegionImagePath(region Region) string {
+	return fmt.Sprintf("cache/region.%d.%d.jpeg", region.PosX, region.PosZ)
 }
