@@ -26,10 +26,6 @@ var staticAssets embed.FS
 
 var config Config
 
-func int24BinaryToInt32(bytes []byte) uint32 {
-	return binary.BigEndian.Uint32(append([]byte{0x00}, bytes...))
-}
-
 func getIntParamWithFallback(r *http.Request, paramName string, fallback int) int {
 	urlParam := r.URL.Query().Get(paramName)
 
@@ -245,19 +241,6 @@ func setCachedBlockData(region Region, blockData []int) {
 	json.NewEncoder(file).Encode(blockData)
 }
 
-func convertToBitString(bytes []byte) string {
-	bitString := ""
-
-	for i := 0; i < len(bytes); i++ {
-		for j := 0; j < 8; j++ {
-			zeroOrOne := bytes[i] >> (7 - j) & 1
-			bitString += fmt.Sprintf("%c", '0'+zeroOrOne)
-		}
-	}
-
-	return bitString
-}
-
 func getRegionData(regions <-chan Region, wg *sync.WaitGroup) {
 	// Decreasing internal counter for wait-group as soon as goroutine finishes
 	defer wg.Done()
@@ -283,7 +266,7 @@ func getRegionData(regions <-chan Region, wg *sync.WaitGroup) {
 				var chunkIndex = chunkX + (chunkZ << 5)
 
 				// The first header block contains the locations of chunk data in the file. Each chunk location is expressed by 3 bytes, and 1 sector count byte.
-				var chunkDataOffsetInSectors uint32 = int24BinaryToInt32(regionFileData[chunkIndex*4 : chunkIndex*4+3])
+				var chunkDataOffsetInSectors uint32 = binary.BigEndian.Uint32(append([]byte{0x00}, regionFileData[chunkIndex*4:chunkIndex*4+3]...))
 
 				// This chunk does not exist
 				if chunkDataOffsetInSectors == 0 {
