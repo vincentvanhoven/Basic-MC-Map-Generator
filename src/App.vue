@@ -22,6 +22,7 @@
                         left: `${(region.PosX * tileSize)}px`,
                     }"
                     @load="onImageLoaded($event, region)"
+                    draggable="false"
                 >
             </template>
 
