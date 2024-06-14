@@ -271,8 +271,6 @@ func getRegionData(regions <-chan Region, wg *sync.WaitGroup) {
 			continue
 		}
 
-		fmt.Printf("Cache MISS for region[x,z]: [%d,%d]\n", region.PosX, region.PosZ)
-
 		regionFileData, error := os.ReadFile(fmt.Sprintf("%s/region/r.%d.%d.mca", config.PathToWorld, region.PosX, region.PosZ))
 
 		if error != nil {
@@ -350,15 +348,10 @@ func getBlockDataForChunk(chunk map[string]interface{}, chunkX int, chunkZ int, 
 			blockIndexInHeightMap := blockIndex / 7
 			blockIndexInHeightMapValue := blockIndex % 7
 
-			// Read the heightmap location
-			b := make([]byte, 8)
-			binary.BigEndian.PutUint64(b, uint64(motionBlockingHeightMap.([]int64)[blockIndexInHeightMap]))
-			bitString := convertToBitString(b)
-
-			blockByteIndexStart := len(bitString) - ((blockIndexInHeightMapValue + 1) * 9)
-			blockHeightMapValueString := bitString[blockByteIndexStart:(blockByteIndexStart + 9)]
-
-			blockHeightMapValue, _ := strconv.ParseUint(blockHeightMapValueString, 2, 0)
+			// Get the packed height map value
+			heightMapPackedValue := uint64(motionBlockingHeightMap.([]int64)[blockIndexInHeightMap])
+			// Shift to the right by index * 9 (>>), and read the last 9 bits (&)
+			blockHeightMapValue := (heightMapPackedValue >> (blockIndexInHeightMapValue * 9)) & uint64(0x1FF)
 
 			// From the wiki: `highestBlockY = (chunk.yPos * 16) - 1 + heightmap_entry_value`
 			blockHeightValue := (int(chunkLowestYSectionPos) * 16) - 1 + int(blockHeightMapValue)
