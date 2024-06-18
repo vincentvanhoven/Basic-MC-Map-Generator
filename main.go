@@ -12,7 +12,6 @@ import (
 	"image/jpeg"
 	_ "image/png"
 
-	"io/fs"
 	"io/ioutil"
 	"math"
 	"net/http"
@@ -62,52 +61,6 @@ func main() {
 	readAllRegionFiles()
 	preloadTileImageCache()
 
-	staticContent, _ := fs.Sub(staticAssets, "static")
-	http.Handle("/", http.FileServer(http.FS(staticContent)))
-
-	http.HandleFunc("GET /region/list", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(getRegionsList())
-	})
-
-	http.HandleFunc("GET /palette", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(getPalette())
-	})
-
-	http.HandleFunc("GET /region/{region_x}/{region_z}/blockdata", func(w http.ResponseWriter, r *http.Request) {
-		region_x, errorX := getIntPathValue(w, r, "region_x")
-		region_z, errorZ := getIntPathValue(w, r, "region_z")
-
-		if errorX != nil || errorZ != nil {
-			return
-		}
-
-		blockData, error := getCachedBlockData(Region{PosX: region_x, PosZ: region_z})
-
-		w.Header().Set("Content-Type", "application/json")
-
-		if error == nil {
-			json.NewEncoder(w).Encode(blockData)
-		} else {
-			json.NewEncoder(w).Encode(make([]int, 0))
-		}
-	})
-
-	http.HandleFunc("GET /region/{region_x}/{region_z}/render", func(w http.ResponseWriter, r *http.Request) {
-		region_x, errorX := getIntPathValue(w, r, "region_x")
-		region_z, errorZ := getIntPathValue(w, r, "region_z")
-
-		if errorX != nil || errorZ != nil {
-			return
-		}
-
-		fmt.Printf("READ [cache/jpeg] for region [%d, %d]\n", region_x, region_z)
-
-		http.ServeFile(w, r, getRegionImagePath(Region{PosX: region_x, PosZ: region_z}))
-	})
-
-	http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", config.WebserverPort), nil)
 }
 
 func readAllRegionFiles() {
@@ -519,8 +472,4 @@ func writeRegionImage(region Region, regionData []int) {
 
 	file.Truncate(0)
 	jpeg.Encode(file, rgba, &jpeg.Options{Quality: 10})
-}
-
-func getRegionImagePath(region Region) string {
-	return fmt.Sprintf("cache/region.%d.%d.jpeg", region.PosX, region.PosZ)
 }
