@@ -30,4 +30,4 @@ jobs:
           npm run build
 
       - name: Go builds
-        run: ${GITHUB_WORKSPACE}/build_all.sh
+        run: ${GITHUB_WORKSPACE}/scripts/build_all.sh
