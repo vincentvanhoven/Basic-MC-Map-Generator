@@ -3,9 +3,9 @@ package main
 import (
 	"bytes"
 	"compress/zlib"
-	"embed"
 	"encoding/binary"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"image"
 	"image/draw"
@@ -14,7 +14,6 @@ import (
 
 	"io/ioutil"
 	"math"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -25,39 +24,18 @@ import (
 	"github.com/Tnze/go-mc/nbt"
 )
 
-//go:embed static/*
-var staticAssets embed.FS
-
 var config Config
 var imageCache map[string]image.Image = make(map[string]image.Image)
 
-func getIntPathValue(w http.ResponseWriter, r *http.Request, paramName string) (int, error) {
-	urlParam := r.PathValue(paramName)
+func main() {
+	var pathToWorld *string = flag.String("path_to_world", "", "Path to the Minecraft world.")
+	var workersCount *int = flag.Int("amount_of_workers", 100, "Number of workers.")
 
-	if len(urlParam) > 0 {
-		urlPathParam, error := strconv.Atoi(urlParam)
-
-		if error == nil {
-			return urlPathParam, error
-		}
+	config = Config{
+		PathToWorld:  *pathToWorld,
+		WorkersCount: *workersCount,
 	}
 
-	// Set content & status headers
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusBadRequest)
-
-	// Prepare a JSON message
-	responseJson := make(map[string]string)
-	responseJson["message"] = fmt.Sprintf("URL path parameter %s must be present and must be numerical.", paramName)
-
-	// Encode the JSON message unto the response
-	json.NewEncoder(w).Encode(responseJson)
-
-	return 0, fmt.Errorf("path param %s is missing", paramName)
-}
-
-func main() {
-	loadConfig()
 	readAllRegionFiles()
 	preloadTileImageCache()
 
@@ -67,10 +45,10 @@ func readAllRegionFiles() {
 	wg := new(sync.WaitGroup)
 	jobs := make(chan Region)
 
-	wg.Add(config.BackgroundWorkersCount)
+	wg.Add(config.WorkersCount)
 
 	// Add workers
-	for w := 1; w <= config.BackgroundWorkersCount; w++ {
+	for w := 1; w <= config.WorkersCount; w++ {
 		go getRegionData(jobs, wg)
 	}
 
@@ -82,43 +60,7 @@ func readAllRegionFiles() {
 		close(jobs)
 	}()
 
-	go func() {
-		wg.Wait()
-	}()
-}
-
-func loadConfig() {
-	var defaultConfig Config = Config{
-		PathToWorld:            "c:/users/vincent/desktop/mc server/anarchy/world",
-		WebserverPort:          8181,
-		BackgroundWorkersCount: 10,
-	}
-
-	filePath, error := getStoragePath("config.json")
-
-	if os.IsNotExist(error) {
-		config = defaultConfig
-		configFile, _ := os.Create(filePath)
-
-		jsonParser := json.NewEncoder(configFile)
-		jsonParser.SetIndent("", "  ")
-		jsonParser.Encode(config)
-
-		fmt.Println("Default config file loaded.")
-		return
-	}
-
-	configFile, error := os.OpenFile(filePath, os.O_RDONLY, os.ModePerm)
-
-	if error != nil {
-		panic(error)
-	}
-
-	defer configFile.Close()
-
-	json.NewDecoder(configFile).Decode(&config)
-
-	fmt.Println("Config file loaded.")
+	wg.Wait()
 }
 
 func getPalette() map[int]string {
@@ -295,7 +237,7 @@ func getRegionData(regions <-chan Region, wg *sync.WaitGroup) {
 		}
 
 		setCachedBlockData(region, blockDataForRegion)
-		writeRegionImage(region, blockDataForRegion)
+		//writeRegionImage(region, blockDataForRegion)
 	}
 }
 

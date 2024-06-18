@@ -1,7 +1,6 @@
 package main
 
 type Config struct {
-	PathToWorld            string
-	WebserverPort          int
-	BackgroundWorkersCount int
+	PathToWorld  string
+	WorkersCount int
 }
